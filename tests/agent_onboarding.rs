@@ -134,6 +134,10 @@ fn configured_generation_gemini(
                 })
                 .to_string(),
                 3 => {
+                    serde_json::json!({"candidates":[{"content":{"parts":[{"text":"not JSON"}]}}]})
+                        .to_string()
+                }
+                4 => {
                     seed_visual(cache.as_path(), understanding.as_str());
                     tts_body()
                 }
@@ -505,7 +509,7 @@ fn configured_new_can_generate_and_wait_in_one_offline_call() {
                     .get(2)
                     .is_some_and(|request| request.contains("Verify only the two IPA fields")
                         && request.contains("gemini-3.8-flash:generateContent")),
-                requests.get(3).is_some_and(
+                requests.get(4).is_some_and(
                     |request| request.contains("gemini-3.8-flash-tts:generateContent")
                 ),
             ],
@@ -520,7 +524,7 @@ fn configured_new_can_generate_and_wait_in_one_offline_call() {
             true,
             Some(0),
             serde_json::json!({"level": "b1", "types": "mixed"}),
-            4,
+            5,
             [true; 3],
         ),
         "configured new --generate --wait did not preserve settings through offline publication"

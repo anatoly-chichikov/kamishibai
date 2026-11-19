@@ -1,0 +1,71 @@
+[
+  {
+    "name": "old_bold",
+    "guid": "K5+jgATr:K",
+    "html": "<p style=\"margin: 0.4em 0;\"><strong>Meaning.</strong></p><ul style=\"margin: 0.4em 0; padding-left: 1.2em;\"><li><strong>a cat</strong> — a furry pet on a windowsill</li></ul><p style=\"margin: 0.4em 0;\"><strong>Usage.</strong> At home.</p>",
+    "entry": {
+      "term": "chat",
+      "meaning": "a cat",
+      "pronunciation": "ʃa",
+      "transcription": "lə ʃa dɔʁ",
+      "importance": 7,
+      "source": {
+        "sentence": "The cat sleeps",
+        "lang": "EN",
+        "highlight": "cat",
+        "hint": "a furry pet",
+        "context": "**Meaning.**\n- **a cat** — a furry pet on a windowsill\n\n**Usage.**\nAt home."
+      },
+      "target": {
+        "sentence": "Le chat dort",
+        "lang": "FR"
+      }
+    }
+  },
+  {
+    "name": "old_unweighted",
+    "guid": "rjS5WTm.fZ",
+    "html": "<p style=\"margin: 0.4em 0;\"><strong>Meaning.</strong></p><ul style=\"margin: 0.4em 0; padding-left: 1.2em;\"><li>a cat — a furry pet on a windowsill</li></ul><p style=\"margin: 0.4em 0;\"><strong>Usage.</strong> At home.</p>",
+    "entry": {
+      "term": "chat",
+      "meaning": "a cat",
+      "pronunciation": "ʃa",
+      "transcription": "lə ʃa dɔʁ",
+      "importance": 7,
+      "source": {
+        "sentence": "The cat sleeps",
+        "lang": "EN",
+        "highlight": "cat",
+        "hint": "a furry pet",
+        "context": "**Meaning.**\n- a cat — a furry pet on a windowsill\n\n**Usage.**\nAt home."
+      },
+      "target": {
+        "sentence": "Le chat dort",
+        "lang": "FR"
+      }
+    }
+  },
+  {
+    "name": "old_four_sections",
+    "guid": "f*6#~Nh+8y",
+    "html": "<p style=\"margin: 0.4em 0;\"><strong>Meaning.</strong></p><ul style=\"margin: 0.4em 0; padding-left: 1.2em;\"><li>a cat — a furry pet on a windowsill</li></ul><p style=\"margin: 0.4em 0;\"><strong>Where you'll hear it.</strong> At home and in animal shelters.</p><p style=\"margin: 0.4em 0;\"><strong>Where it's out of place.</strong> For wild animals people use their species names.</p><p style=\"margin: 0.4em 0;\"><strong>Subtlety.</strong> People also say kitten for a young cat.</p>",
+    "entry": {
+      "term": "chat",
+      "meaning": "a cat",
+      "pronunciation": "ʃa",
+      "transcription": "lə ʃa dɔʁ",
+      "importance": 7,
+      "source": {
+        "sentence": "The cat sleeps",
+        "lang": "EN",
+        "highlight": "cat",
+        "hint": "a furry pet",
+        "context": "**Meaning.**\n- a cat — a furry pet on a windowsill\n\n**Where you'll hear it.**\nAt home and in animal shelters.\n\n**Where it's out of place.**\nFor wild animals people use their species names.\n\n**Subtlety.**\nPeople also say kitten for a young cat."
+      },
+      "target": {
+        "sentence": "Le chat dort",
+        "lang": "FR"
+      }
+    }
+  }
+]

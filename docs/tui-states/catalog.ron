@@ -1017,6 +1017,9 @@ Catalog(
             expectations: [
                 "Expanded metadata labels are the phrase, in your language, a visual clue, word meaning, word pronunciation, phrase pronunciation and worth learning",
                 "Show the right context only for nonempty context",
+                "New explanations keep only headings bold, the first meaning bright and other meanings muted, with quoted learning phrases and adjacent example and translation lines",
+                "Explicit explanation format or accepted provenance selects the new layout; legacy contexts retain their original styles regardless of wording",
+                "French quotation spaces stay joined to their words when a new explanation wraps",
                 "Preview labels are statements or nouns, while adjustment controls are questions",
             ],
             grounds: Grounds(
@@ -1026,6 +1029,8 @@ Catalog(
                 ],
                 tests: [
                     Check(file: "tests/your_cards.rs", test: "expanded_card_shows_meta_preview_only_no_duplicate_artifact_pane"),
+                    Check(file: "src/tui/screens/your_cards.rs", test: "review_f8_terminal_wrap_cannot_separate_french_quotes"),
+                    Check(file: "tests/explanation.rs", test: "old_and_new_note_fields_and_terminal_lines_keep_their_rendering_snapshots"),
                 ],
             ),
         ),
@@ -1544,8 +1549,14 @@ Catalog(
                         Action(
                             event: "cleanup completes",
                             target: "export.cancelling",
-                            condition: "the worker has stopped",
-                            expectation: "Return to the terminal after removing the unfinished file; this terminal action has no next UI state",
+                            condition: "the worker stopped before publishing",
+                            expectation: "Remove the unfinished file and report cancellation in the restored terminal",
+                        ),
+                        Action(
+                            event: "publication wins the race with cancellation",
+                            target: "export.cancelling",
+                            condition: "the worker has already published the verified file",
+                            expectation: "Print the saved path in the restored terminal and exit",
                         ),
                     ],
                 ),
@@ -1558,6 +1569,8 @@ Catalog(
                     tests: [
                         Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
                         Check(file: "src/cli/export/screen.rs", test: "cancelling_an_active_save_waits_for_temporary_file_cleanup"),
+                        Check(file: "tests/anki_history.rs", test: "cancelling_a_save_cannot_hide_cleanup_or_its_outcome"),
+                        Check(file: "tests/anki_history.rs", test: "a_late_control_c_cannot_hide_the_published_archive"),
                     ],
                 ),
                 evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
@@ -3790,6 +3803,7 @@ Catalog(
                     expectations: [
                         "Focus remains on the head; tune rows are visible without bright questions, bright chevrons or a note cursor",
                         "Step rows precede tune rows, metadata preview and rejected attempts; collapsed tags do not repeat beside the open block",
+                        "The explanation lists approved meanings in order and omits empty sections; only headings are bold and the first meaning is brighter",
                     ],
                     actions: [
                         Action(
@@ -3845,6 +3859,18 @@ Catalog(
                     ],
                 ),
                 evidence: Captured([
+                    Shot(
+                        file: "docs/tui-states/live/39-card-explanation.png",
+                        origin: Synthetic,
+                        revision: None,
+                        note: "Recaptured with the T437 explicit-format fix on 2026-11-16; byte-identical to the earlier prepared explanation capture and visually inspected",
+                    ),
+                    Shot(
+                        file: "docs/tui-states/live/41-card-explanation-narrow.png",
+                        origin: Synthetic,
+                        revision: None,
+                        note: "Recaptured at narrow width with the T437 explicit-format fix on 2026-11-16; byte-identical to the earlier capture and visually inspected",
+                    ),
                     Shot(
                         file: "docs/tui-states/live/09-card-open.png",
                         origin: Live,
@@ -5382,6 +5408,18 @@ Catalog(
                 ),
                 evidence: Captured([
                     Shot(
+                        file: "docs/tui-states/live/40-card-explanation-end.png",
+                        origin: Synthetic,
+                        revision: None,
+                        note: "Recaptured at the explanation end with the T437 explicit-format fix on 2026-11-16; byte-identical to the earlier capture and visually inspected",
+                    ),
+                    Shot(
+                        file: "docs/tui-states/live/42-card-explanation-end-narrow.png",
+                        origin: Synthetic,
+                        revision: None,
+                        note: "Recaptured at the narrow explanation end with the T437 explicit-format fix on 2026-11-16; byte-identical to the earlier capture and visually inspected",
+                    ),
+                    Shot(
                         file: "docs/tui-states/live/10-card-scroll-end.png",
                         origin: Live,
                         revision: Some("6fd3ef4"),
@@ -5607,9 +5645,12 @@ Catalog(
                 route: ["export.summary", "export.saving", "export.cancelling"],
                 expectations: [
                     "Cancellation drains publication before returning to the terminal",
+                    "The restored terminal reports cancellation or the path the worker already published",
                 ],
                 tests: [
                     Check(file: "src/cli/export/screen.rs", test: "cancelling_an_active_save_waits_for_temporary_file_cleanup"),
+                    Check(file: "tests/anki_history.rs", test: "cancelling_a_save_cannot_hide_cleanup_or_its_outcome"),
+                    Check(file: "tests/anki_history.rs", test: "a_late_control_c_cannot_hide_the_published_archive"),
                 ],
             ),
             Scenario(head: Head(id: "export.close-anki", intent: "Anki ownership refusal returns through another ownership check before any profile or deck is read"),

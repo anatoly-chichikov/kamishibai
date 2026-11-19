@@ -1,0 +1,22 @@
+---
+source: tests/explanation.rs
+assertion_line: 29
+expression: "serde_json::to_string_pretty(&serde_json::json!({\"fields\":note.fields,\"guid\":note.guid,\"sort_field\":note.sort_field})).unwrap()"
+---
+{
+  "fields": [
+    "Директор провел жесткую границу и отказался соглашаться на дальнейшие сокращения бюджета.",
+    "line in the sand",
+    "/laɪn ɪn ðə sænd/",
+    "крайняя черта, жесткая граница",
+    "The director drew a line in the sand and refused to accept any further budget cuts.",
+    "7",
+    "[sound:probe.wav]",
+    "<img src=\"probe.jpg\">",
+    "A boundary on the sand",
+    "<p style=\"margin: 0.55em 0; line-height: 1.5;\"><strong>Значение.</strong></p><ul style=\"margin: 0.45em 0; padding-left: 1.2em; line-height: 1.5;\"><li style=\"color: var(--kamishibai-term, inherit);\">жёсткая граница — в споре, в сделке, в требованиях</li><li style=\"color: var(--kamishibai-hint, inherit);\">дословно — «черта на песке»</li></ul><p style=\"margin: 0.55em 0; line-height: 1.5;\"><strong>Где встречается.</strong> На переговорах, в политике и деловых спорах, когда объявляют крайний предел уступок.</p><p style=\"margin: 0.55em 0; line-height: 1.5;\"><strong>Где неуместно.</strong> О мелких бытовых рамках или гибких правилах говорят «limit» или «boundary». Иначе прозвучит слишком пафосно.</p><p style=\"margin: 0.55em 0; line-height: 1.5;\"><strong>Нюанс.</strong> Говорят «draw a line in the sand», а не «make a line in the sand». Слово «draw» передаёт черту, проведённую по песку.</p><p style=\"margin: 0.55em 0; line-height: 1.5;\">«We need to draw a line in the sand.»<br>— Нам пора провести крайнюю черту.</p>",
+    "/sample/"
+  ],
+  "guid": "F,*C76cy+(",
+  "sort_field": "Директор провел жесткую границу и отказался соглашаться на дальнейшие сокращения бюджета."
+}

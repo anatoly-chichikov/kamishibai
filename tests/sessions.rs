@@ -507,6 +507,7 @@ fn costed_session_snapshots(cache: &Path, id: &str) -> (PathBuf, Vec<u8>, PathBu
 struct GenerationCalls {
     meta: AtomicUsize,
     phonetics: AtomicUsize,
+    explanation: AtomicUsize,
     sound: AtomicUsize,
 }
 
@@ -560,16 +561,24 @@ fn metered_generation_gemini(cell: PathBuf) -> (String, Arc<GenerationCalls>) {
                 let request = complete_request(&mut stream);
                 let sound = request.contains("gemini-3.8-flash-tts");
                 let phonetics = request.contains("Verify only the two IPA fields");
+                let explanation = request.contains("You write the explanation shown")
+                    || request.contains("You are the editor of the explanations");
                 if sound {
                     counted.sound.fetch_add(1, Ordering::SeqCst);
                 } else if phonetics {
                     counted.phonetics.fetch_add(1, Ordering::SeqCst);
+                } else if explanation {
+                    counted.explanation.fetch_add(1, Ordering::SeqCst);
                 } else {
                     counted.meta.fetch_add(1, Ordering::SeqCst);
                 }
                 std::thread::sleep(Duration::from_millis(500));
                 let content = if sound {
                     serde_json::json!({"inlineData": {"data": "AAA="}})
+                } else if explanation {
+                    let mut value = super::explanation::cat_response();
+                    value["meanings"][0] = serde_json::json!({"head":"a duck","note":"a water bird beside the pond","from":"1"});
+                    serde_json::json!({"text":value.to_string()})
                 } else if phonetics {
                     serde_json::json!({"text": serde_json::json!({
                         "pronunciation": "kanaʁ",
@@ -839,6 +848,7 @@ fn concurrent_sessions_share_one_meta_and_sound_request_with_exact_costs() {
             second_ok,
             calls.meta.load(Ordering::SeqCst),
             calls.phonetics.load(Ordering::SeqCst),
+            calls.explanation.load(Ordering::SeqCst),
             calls.sound.load(Ordering::SeqCst),
             meta["requests"].as_u64(),
             meta["cost"]["nanos"].as_u64(),
@@ -850,9 +860,10 @@ fn concurrent_sessions_share_one_meta_and_sound_request_with_exact_costs() {
             true,
             1,
             1,
+            2,
             1,
-            Some(2),
-            Some(84_000),
+            Some(4),
+            Some(136_500),
             Some(1),
             Some(expected_sound),
         ),

@@ -17,6 +17,7 @@ fn entry(source: &str, target: &str) -> VocabularyEntry {
         transcription: text("word"),
         importance: score(5),
         source: VocabularySource {
+            context_format: kamishibai::vocabulary::ContextFormat::Legacy,
             sentence: text("пример"),
             lang: code(source),
             highlight: text("пример"),

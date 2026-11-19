@@ -267,7 +267,7 @@ pub(super) fn render_card_prompt(
         "source_sentence": meta.source_sentence(),
         "source_highlight": meta.source_highlight(),
         "source_hint": meta.source_hint(),
-        "source_context": meta.source_context(),
+        "source_context": meta.metadata_context(),
         "target_sentence": meta.target_sentence(),
         "labels": labels,
     }))?;
@@ -423,6 +423,33 @@ mod tests {
         AxisSet, CardDraft, CardMeta, LanguagePair, RawInputBatch, Register, Sense, SentenceAxis,
         SentenceKind, SentenceLabelSelection, SentenceLabels, SentenceLevel, WordCandidate,
     };
+
+    #[test]
+    fn correction_cannot_use_the_composed_explanation_as_its_metadata_source() {
+        let pair = LanguagePair::new("EN", "RU");
+        let meta = CardMeta::new(
+            "ipa",
+            "ipa",
+            "утка",
+            5,
+            "Утка спит",
+            "Утка",
+            "clue",
+            "displayed explanation",
+            "A duck sleeps",
+        )
+        .with_explanation(Some(crate::explanation::Record::new(
+            None,
+            String::from("stamp"),
+            String::from("original metadata draft"),
+        )));
+        let draft = CardDraft::new("duck", "утка", pair.clone()).with_meta(meta, None);
+        let prompt = render_card_prompt(&draft, "a learner request", &pair, &catalog()).unwrap();
+        assert!(
+            prompt.contains("original metadata draft") && !prompt.contains("displayed explanation"),
+            "correction read the composed explanation instead of its preserved metadata draft"
+        );
+    }
 
     #[test]
     fn classical_latin_metadata_cannot_request_an_unspecified_variety() {

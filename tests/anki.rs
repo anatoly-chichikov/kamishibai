@@ -292,6 +292,18 @@ fn vocabulary_notes_keep_the_frozen_first_note_payload() {
     );
 }
 
+#[test]
+fn old_note_guids_cannot_change_on_reimport() {
+    let format = VocabularyNote::new(CardModel::new().model());
+    let entries = entries();
+    assert_eq!(
+        [format.note(&entries[0], "[sound:9c0f6ba9a5a7.wav]", "<img src='51a07a17e75e.jpg' style='max-width: 100%; height: auto; border-radius: 10px'>").guid,
+         format.note(&entries[1], "[sound:24d2497f1d81.wav]", "<img src='179104d071c6.jpg' style='max-width: 100%; height: auto; border-radius: 10px'>").guid],
+        [String::from("76U*F;h)z"), String::from("k6Q#u8NdG&")],
+        "a published note changed its guid and would duplicate on reimport"
+    );
+}
+
 /// Deck attachment keeps insertion order while deduplicating paths.
 #[test]
 fn deck_attachment_keeps_insertion_order_while_deduplicating_paths() {

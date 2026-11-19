@@ -124,6 +124,13 @@ fn ipa_body(pronunciation: &str, transcription: &str) -> Result<TransportRespons
     }))
 }
 
+/// Charge an unparseable explanation while retaining the metadata under test.
+fn explanation_fallback_body() -> Result<TransportResponse> {
+    body(
+        json!({"candidates":[{"content":{"parts":[{"text":"not JSON"}]}}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2,"thoughtsTokenCount":3,"totalTokenCount":10}}),
+    )
+}
+
 /// Return the first text prompt recorded by fake transport.
 fn recorded_prompt(requests: &Rc<RefCell<Vec<(String, String)>>>) -> Result<String> {
     let body = requests.borrow()[0].1.clone();
@@ -138,8 +145,14 @@ fn recorded_prompt(requests: &Rc<RefCell<Vec<(String, String)>>>) -> Result<Stri
 /// Decode the immutable card input carried by the final phonetic request.
 fn recorded_phonetic_input(requests: &Rc<RefCell<Vec<(String, String)>>>) -> Result<Value> {
     let captured = requests.borrow();
-    let response: Value =
-        serde_json::from_str(&captured.last().expect("IPA request must exist").1)?;
+    let response: Value = serde_json::from_str(
+        &captured
+            .iter()
+            .rev()
+            .find(|(_, body)| body.contains("Verify only the two IPA fields"))
+            .expect("IPA request must exist")
+            .1,
+    )?;
     let prompt = response["contents"][0]["parts"][0]["text"]
         .as_str()
         .expect("IPA request must carry text");
@@ -606,6 +619,7 @@ fn card_meta_generation_uses_flash_and_returns_full_meta() -> Result<()> {
             }]
         }))?),
         ipa_body("bɔroʊ", "kæn aɪ bɔroʊ jʊr pɛn"),
+        explanation_fallback_body(),
     ]);
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
@@ -639,7 +653,7 @@ fn card_meta_generation_uses_flash_and_returns_full_meta() -> Result<()> {
                 String::from(
                     "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
                 );
-                2
+                3
             ],
             ("bɔroʊ", "kæn aɪ bɔroʊ jʊr pɛn"),
             "Can I borrow your pen?",
@@ -670,6 +684,7 @@ fn draft_metadata_preserves_reviewed_senses_and_requested_labels() -> Result<()>
     let transport = FakeTransport::new(vec![
         body(json!({"candidates":[{"content":{"parts":[{"text":authored.to_string()}]}}]})),
         ipa_body("kanaʁ", "sə kanaʁ siʁkyl"),
+        explanation_fallback_body(),
     ]);
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
@@ -704,7 +719,7 @@ fn draft_metadata_preserves_reviewed_senses_and_requested_labels() -> Result<()>
                 .contains(SentenceAxis::Level),
         ),
         (
-            2,
+            3,
             true,
             json!([{"understanding":"a false report","tag":"journalism"},{"understanding":"a duck","tag":"animal"}]),
             true,
@@ -770,6 +785,7 @@ fn card_correction_uses_flash_to_recompose_term_understanding_and_meta() -> Resu
             }]
         }))?),
         ipa_body("waʊnd", "aɪ waʊnd ðə klɑk"),
+        explanation_fallback_body(),
     ]);
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
@@ -850,7 +866,7 @@ fn only_a_per_card_correction_marks_its_metadata_as_rewritten() -> Result<()> {
                     }]
                 }
             }]
-        }))?), ipa_body("ˈbɒrəʊ", "kən aɪ ˈbɒrəʊ jɔː ˈpɛn")]),
+        }))?), ipa_body("ˈbɒrəʊ", "kən aɪ ˈbɒrəʊ jɔː ˈpɛn"), explanation_fallback_body()]),
     )
     .generate_card_meta(
         "borrow",
@@ -868,7 +884,7 @@ fn only_a_per_card_correction_marks_its_metadata_as_rewritten() -> Result<()> {
                     }]
                 }
             }]
-        }))?), ipa_body("ˈbɒrəʊ", "meɪ aɪ ˈbɒrəʊ jɔː ˈpɛn")]),
+        }))?), ipa_body("ˈbɒrəʊ", "meɪ aɪ ˈbɒrəʊ jɔː ˈpɛn"), explanation_fallback_body()]),
     )
     .correct_card(
         &CardDraft::new(

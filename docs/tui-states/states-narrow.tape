@@ -85,3 +85,25 @@ Screenshot "live/35-stopped-new-batch-armed-narrow.png"
 Sleep 2500ms
 Type "q"
 Sleep 500ms
+
+# cards.open — explanation at the narrow terminal width
+Type "./target/release/examples/tui_states --state cards.open"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/41-card-explanation-narrow.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.scroll-end — explanation end at the narrow terminal width
+Type "./target/release/examples/tui_states --state cards.scroll-end"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/42-card-explanation-end-narrow.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms

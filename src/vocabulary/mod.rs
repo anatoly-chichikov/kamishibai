@@ -4,6 +4,6 @@ mod document;
 mod entry;
 
 pub use entry::{
-    Importance, LanguageCode, NonEmptyText, VocabularyDocument, VocabularyEntry, VocabularySource,
-    VocabularyTarget,
+    ContextFormat, Importance, LanguageCode, NonEmptyText, VocabularyDocument, VocabularyEntry,
+    VocabularySource, VocabularyTarget,
 };

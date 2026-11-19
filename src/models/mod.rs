@@ -20,6 +20,8 @@ pub enum GenerationStage {
     Correction,
     /// Check pronunciation and transcription.
     Phonetics,
+    /// Write, edit, or repair the bounded learner-facing explanation.
+    Explanation,
     /// Extract features used to choose a scene layout.
     Features,
     /// Compose a scene inside its selected layout.

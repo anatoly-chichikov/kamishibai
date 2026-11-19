@@ -1,0 +1,130 @@
+{
+  "type": "object",
+  "properties": {
+    "meanings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "head": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "head",
+          "note",
+          "from"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "literal": {
+      "type": "string"
+    },
+    "where": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "example": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "translation": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "translation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "text",
+        "example"
+      ],
+      "additionalProperties": false
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "example": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "translation": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "translation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "text",
+        "example"
+      ],
+      "additionalProperties": false
+    },
+    "nuance": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "why": {
+          "type": "string"
+        },
+        "example": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "translation": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "translation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "text",
+        "why",
+        "example"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "meanings",
+    "literal",
+    "where",
+    "limits",
+    "nuance"
+  ],
+  "additionalProperties": false
+}

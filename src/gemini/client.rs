@@ -1,4 +1,7 @@
 use std::env;
+
+#[path = "explanation.rs"]
+mod explanation;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -749,7 +752,7 @@ where
 
     /// Refine only the supplied card's term and sentence pronunciation in its selected meaning.
     pub fn refine_pronunciation(&self, draft: &CardDraft, meta: CardMeta) -> Result<CardMeta> {
-        self.phonetics_observed(draft, meta, draft.pair(), &mut |_| Ok(()))
+        self.phonetics_observed(draft, meta, draft.pair(), &mut MetaAttempt::new(|_| Ok(())))
     }
 
     /// Build rich card meta and return the request cost record.
@@ -784,17 +787,46 @@ where
         &self,
         draft: &CardDraft,
         request: Option<&SentenceLabelSelection>,
-        mut observe: F,
+        observe: F,
     ) -> Result<CardMeta>
     where
         F: FnMut(CostRecord) -> Result<()>,
     {
         let catalog = catalog();
         let prompt = render_card_meta_prompt(draft, request, &catalog)?;
-        let raw = self.card_text_observed(GenerationStage::Metadata, prompt, &mut observe)?;
         let senses = prioritized_senses(draft);
-        let meta = card_meta_from_raw(raw.as_str(), request, &senses)?;
-        self.phonetics_observed(draft, meta, draft.pair(), &mut observe)
+        let mut attempt = MetaAttempt::new(observe);
+        let mut author = |prompt| {
+            let raw = self.card_text_observed(GenerationStage::Metadata, prompt, &mut attempt)?;
+            card_meta_from_raw(&raw, request, &senses)
+        };
+        let pair = draft.pair();
+        let spelling = |meta: &CardMeta| {
+            crate::languages::mixed_sentence_word(
+                meta.target_sentence(),
+                draft.term(),
+                pair.learning(),
+                pair.known(),
+            )
+            .map(str::to_owned)
+        };
+        let mut meta = author(prompt.clone())?;
+        if spelling(&meta).is_some() {
+            meta = author(prompt)?;
+            if let Some(word) = spelling(&meta) {
+                bail!(
+                    "The retried target sentence still mixes reader and learning scripts in {word:?}"
+                );
+            }
+        }
+        let meta = self.phonetics_observed(draft, meta, draft.pair(), &mut attempt)?;
+        self.explanation_observed(
+            draft,
+            meta,
+            crate::explanation::Operation::Create,
+            "",
+            &mut attempt,
+        )
     }
 
     /// Recompose one card draft after a per-card refinement.
@@ -831,19 +863,27 @@ where
         draft: &CardDraft,
         comment: &str,
         pair: &LanguagePair,
-        mut observe: F,
+        observe: F,
     ) -> Result<CardRevision>
     where
         F: FnMut(CostRecord) -> Result<()>,
     {
         let catalog = catalog();
         let prompt = render_card_prompt(draft, comment, pair, &catalog)?;
-        let raw = self.card_text_observed(GenerationStage::Correction, prompt, &mut observe)?;
+        let mut attempt = MetaAttempt::new(observe);
+        let raw = self.card_text_observed(GenerationStage::Correction, prompt, &mut attempt)?;
         let decoded: CardCorrectionResponse = serde_json::from_str(unfence(raw.trim()))?;
         let revision = contextual_revision(draft, decoded.into_revision(label_selection(draft))?)?;
         let settled = draft.clone().with_revision(revision.clone(), None);
         let (term, understanding, meta) = revision.into_parts();
-        let meta = self.phonetics_observed(&settled, meta, pair, &mut observe)?;
+        let meta = self.phonetics_observed(&settled, meta, pair, &mut attempt)?;
+        let meta = self.explanation_observed(
+            &settled,
+            meta,
+            crate::explanation::Operation::Revise,
+            comment,
+            &mut attempt,
+        )?;
         Ok(CardRevision::new(term, understanding, meta))
     }
 
@@ -1253,12 +1293,13 @@ where
         &self,
         stage: GenerationStage,
         prompt: String,
-        observe: &mut F,
+        attempt: &mut MetaAttempt<F>,
     ) -> Result<String>
     where
         F: FnMut(CostRecord) -> Result<()>,
     {
-        let metered = self.request_stage(
+        let response = attempt.request(
+            self,
             stage,
             &Request::text(
                 prompt,
@@ -1266,8 +1307,7 @@ where
                 None,
             ),
         )?;
-        observe(metered.cost.clone())?;
-        let raw = response_text(&metered.response);
+        let raw = response_text(&response);
         if raw.trim().is_empty() {
             bail!("No text content in Gemini response");
         }
@@ -1279,13 +1319,14 @@ where
         draft: &CardDraft,
         meta: CardMeta,
         pair: &LanguagePair,
-        observe: &mut F,
+        attempt: &mut MetaAttempt<F>,
     ) -> Result<CardMeta>
     where
         F: FnMut(CostRecord) -> Result<()>,
     {
         let prompt = render_phonetics_prompt(draft, &meta, pair)?;
-        let metered = self.request_stage(
+        let response = attempt.request(
+            self,
             GenerationStage::Phonetics,
             &Request::text(
                 prompt,
@@ -1293,8 +1334,7 @@ where
                 None,
             ),
         )?;
-        observe(metered.cost.clone())?;
-        let raw = response_text(&metered.response);
+        let raw = response_text(&response);
         if raw.trim().is_empty() {
             bail!("No text content in Gemini phonetics response");
         }
@@ -1484,6 +1524,36 @@ fn diagnosis(response: &GeneratedResponse) -> String {
 struct MeteredResponse {
     response: GeneratedResponse,
     cost: CostRecord,
+}
+
+/// Share the six text requests and their cost observer across one card metadata attempt.
+struct MetaAttempt<F> {
+    remaining: u8,
+    observe: F,
+}
+
+impl<F: FnMut(CostRecord) -> Result<()>> MetaAttempt<F> {
+    fn new(observe: F) -> Self {
+        Self {
+            remaining: 6,
+            observe,
+        }
+    }
+
+    fn request<T: Transport>(
+        &mut self,
+        client: &GeminiClient<T>,
+        stage: GenerationStage,
+        request: &Request,
+    ) -> Result<GeneratedResponse> {
+        self.remaining = self
+            .remaining
+            .checked_sub(1)
+            .context("Card metadata reached its six-request limit")?;
+        let metered = client.request_stage(stage, request)?;
+        (self.observe)(metered.cost)?;
+        Ok(metered.response)
+    }
 }
 
 fn response_text(response: &GeneratedResponse) -> String {
@@ -2429,6 +2499,9 @@ mod tests {
             .and_then(|models| {
                 models.with_model(GenerationStage::Phonetics, format!("{tag}-phonetics"))
             })
+            .and_then(|models| {
+                models.with_model(GenerationStage::Explanation, format!("{tag}-explanation"))
+            })
             .expect("test model identifiers must validate");
         GeminiProfile::new(
             format!("https://{tag}.example/models"),
@@ -2571,6 +2644,176 @@ mod tests {
         );
     }
 
+    fn water_metadata(sentence: &str) -> Value {
+        let mut value = card_meta_response(sentence_labels_response(
+            "neutral",
+            "a1",
+            "statement",
+            vec![],
+        ));
+        value["meaning"] = json!("पानी");
+        value["source_sentence"] = json!("इस गिलास में ठंडा पानी है।");
+        value["source_highlight"] = json!("पानी");
+        value["source_hint"] = json!("काँच के गिलास में भरा साफ़ तरल।");
+        value["source_context"] = json!("पीने के लिए पानी।");
+        value["target_sentence"] = json!(sentence);
+        value
+    }
+
+    #[test]
+    fn metadata_attempt_cannot_spend_a_seventh_request_on_an_editor_repair() {
+        let wrong = water_metadata("В этом стакаने холодная вода.");
+        let right = water_metadata("В этом стакане холодная вода.");
+        let transport = FakeTransport::new(
+            [text_body(&wrong), text_body(&right), phonetics_body(&right)]
+                .into_iter()
+                .chain((0..4).map(|_| unacceptable_explanation_body()))
+                .collect(),
+        );
+        let draft = CardDraft::new("вода", "पानी", LanguagePair::new("RU", "HI"));
+        let mut charges = 0;
+        let meta = GeminiClient::new("fixture", transport.clone())
+            .generate_draft_meta_observed(&draft, None, |cost| {
+                charges += cost.requests();
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            (
+                transport.requests.borrow().len(),
+                charges,
+                meta.source_context()
+            ),
+            (6, 6, right["source_context"].as_str().unwrap()),
+            "the metadata attempt exceeded its six requests or lost its fallback"
+        );
+    }
+
+    #[test]
+    fn an_accepted_explanation_cannot_replace_the_metadata_sentences() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/explanation/metadata_example.json"
+        ))
+        .unwrap();
+        let input = &fixture["input"];
+        let mut parts = fixture["parts"].clone();
+        parts["nuance"]["example"] = json!({"text":"","translation":""});
+        let mut value = card_meta_response(sentence_labels_response(
+            "neutral",
+            "a2",
+            "statement",
+            vec![],
+        ));
+        value["meaning"] = input["translation"].clone();
+        value["source_sentence"] = input["sentence_known"].clone();
+        value["source_highlight"] = json!("мелкую сошку");
+        value["source_context"] = input["old"].clone();
+        value["target_sentence"] = input["sentence"].clone();
+        let transport = FakeTransport::new(vec![
+            text_body(&value),
+            phonetics_body(&value),
+            text_body(&parts),
+            text_body(&parts),
+        ]);
+        let candidate = WordCandidate::with_senses(
+            "small fry",
+            vec![Sense::plain("мелкая сошка"), Sense::plain("малыши")],
+            0,
+            true,
+        );
+        let draft = CardDraft::from_candidate(&candidate, 0, LanguagePair::new("EN", "RU"));
+        let meta = GeminiClient::new("fixture", transport.clone())
+            .generate_draft_meta(&draft, None)
+            .unwrap();
+        assert_eq!(
+            (
+                transport.requests.borrow().len(),
+                meta.context_format(),
+                meta.source_sentence(),
+                meta.source_highlight(),
+                meta.target_sentence(),
+            ),
+            (
+                4,
+                crate::vocabulary::ContextFormat::ExplanationV1,
+                value["source_sentence"].as_str().unwrap(),
+                "мелкую сошку",
+                value["target_sentence"].as_str().unwrap(),
+            ),
+            "the accepted explanation altered the card sentences or requested a translation"
+        );
+    }
+
+    #[test]
+    fn a_new_card_cannot_send_a_mixed_alphabet_word_to_phonetics() {
+        let wrong = water_metadata("В этом стакаने холодная вода.");
+        let right = water_metadata("В этом стакане холодная вода.");
+        let transport = FakeTransport::new(vec![
+            text_body(&wrong),
+            text_body(&right),
+            phonetics_body(&right),
+            explanation_fallback_body(),
+        ]);
+        let draft = CardDraft::new("вода", "पानी", LanguagePair::new("ru", "hi"));
+        let mut charges = 0;
+        let result = GeminiClient::new("key", transport.clone()).generate_draft_meta_observed(
+            &draft,
+            None,
+            |_| {
+                charges += 1;
+                Ok(())
+            },
+        );
+        let requests = transport.requests.borrow();
+        let target = requests.get(2).and_then(|request| {
+            let wire: Value = serde_json::from_str(request).unwrap();
+            let prompt = wire["contents"][0]["parts"][0]["text"].as_str().unwrap();
+            prompt
+                .contains("В этом стакане холодная вода.")
+                .then_some(())
+        });
+        assert_eq!(
+            (
+                result.ok().map(|meta| meta.target_sentence().to_string()),
+                target,
+                charges,
+                requests[0] == requests[1]
+            ),
+            (
+                Some("В этом стакане холодная вода.".to_owned()),
+                Some(()),
+                4,
+                true
+            ),
+            "the metadata retry changed its bytes, lost the corrected sentence, or lost a charge"
+        );
+    }
+
+    #[test]
+    fn persistent_mixed_word_spelling_cannot_reach_phonetics_after_a_paid_repair() {
+        let wrong = water_metadata("В этом стакаने холодная вода.");
+        let transport = FakeTransport::new(vec![text_body(&wrong), text_body(&wrong)]);
+        let draft = CardDraft::new("вода", "पानी", LanguagePair::new("ru", "hi"));
+        let mut charges = 0;
+        let result = GeminiClient::new("key", transport.clone()).generate_draft_meta_observed(
+            &draft,
+            None,
+            |_| {
+                charges += 1;
+                Ok(())
+            },
+        );
+        let requests = transport.requests.borrow();
+        let stages: Vec<Value> = requests.iter().map(|body| {
+            serde_json::from_str::<Value>(body).unwrap()["generationConfig"]["thinkingConfig"]["thinkingLevel"].clone()
+        }).collect();
+        assert_eq!(
+            (result.is_err(), charges, stages),
+            (true, 2, vec![json!("HIGH"), json!("HIGH")]),
+            "a repeated script error escaped the bounded, fully accounted metadata repair"
+        );
+    }
+
     #[test]
     fn explicit_metadata_and_phonetics_use_independent_stage_policies() {
         let value = card_meta_response(sentence_labels_response(
@@ -2579,7 +2822,11 @@ mod tests {
             "statement",
             vec![],
         ));
-        let transport = FakeTransport::new(vec![text_body(&value), phonetics_body(&value)]);
+        let transport = FakeTransport::new(vec![
+            text_body(&value),
+            phonetics_body(&value),
+            explanation_fallback_body(),
+        ]);
         let client =
             GeminiClient::from_profile("key", transport.clone(), configured_profile("tenant"));
         let mut records = Vec::new();
@@ -2617,13 +2864,17 @@ mod tests {
             (
                 vec![
                     String::from("https://tenant.example/models/tenant-meta:generateContent"),
-                    String::from("https://tenant.example/models/tenant-phonetics:generateContent")
+                    String::from("https://tenant.example/models/tenant-phonetics:generateContent"),
+                    String::from(
+                        "https://tenant.example/models/tenant-explanation:generateContent"
+                    )
                 ],
                 vec![
                     String::from("tenant:Metadata"),
-                    String::from("tenant:Phonetics")
+                    String::from("tenant:Phonetics"),
+                    String::from("tenant:Explanation")
                 ],
-                vec![1, 1],
+                vec![1, 1, 1],
             ),
             "metadata stages ignored explicit models or prompts, or dropped unpriced requests"
         );
@@ -2783,6 +3034,245 @@ mod tests {
                 "totalTokenCount": 21
             }
         }))
+    }
+
+    fn explanation_fallback_body() -> Result<TransportResponse> {
+        body(json!({
+            "candidates": [{"content": {"parts": [{"text": "not JSON"}]}}],
+            "usageMetadata": {"promptTokenCount":5,"candidatesTokenCount":2,"thoughtsTokenCount":3,"totalTokenCount":10}
+        }))
+    }
+
+    #[test]
+    fn provider_refusals_cannot_be_treated_as_unparseable_explanations() {
+        let value = card_meta_response(sentence_labels_response(
+            "neutral",
+            "a2",
+            "statement",
+            Vec::new(),
+        ));
+        let refusals = [
+            body(
+                json!({"candidates":[{"finishReason":"SAFETY"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2,"totalTokenCount":7}}),
+            ),
+            body(
+                json!({"promptFeedback":{"blockReason":"SAFETY"},"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":0,"totalTokenCount":5}}),
+            ),
+            Err(anyhow!("explanation transport failed")),
+        ];
+        let results = refusals
+            .into_iter()
+            .map(|refusal| {
+                let client = GeminiClient::new(
+                    "key",
+                    FakeTransport::new(vec![text_body(&value), phonetics_body(&value), refusal]),
+                );
+                let mut costs = Vec::new();
+                let result = client.generate_draft_meta_observed(
+                    &CardDraft::new("canard", "a duck", LanguagePair::new("FR", "EN")),
+                    None,
+                    |cost| {
+                        costs.push(cost);
+                        Ok(())
+                    },
+                );
+                (result.is_err(), costs.len())
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            results,
+            [(true, 3), (true, 3), (true, 2)],
+            "a provider refusal silently installed a metadata fallback or lost measured usage"
+        );
+    }
+
+    #[test]
+    fn six_reviewed_senses_keep_the_complete_metadata_without_explanation_spend() {
+        let candidate = WordCandidate::with_senses(
+            "set",
+            ["a group", "place", "harden", "sunset", "prepare", "fixed"]
+                .into_iter()
+                .map(Sense::plain)
+                .collect(),
+            0,
+            true,
+        );
+        let draft = CardDraft::from_candidate(&candidate, 0, LanguagePair::new("EN", "RU"));
+        let original =
+            "a group; place; harden; sunset; prepare; fixed — complete original explanation";
+        let meta = CardMeta::new(
+            "ipa",
+            "sentence ipa",
+            "a group",
+            7,
+            "source",
+            "group",
+            "hint",
+            original,
+            "This is a set.",
+        );
+        let transport = FakeTransport::new(vec![explanation_fallback_body()]);
+        let client = GeminiClient::new("key", transport.clone());
+        let mut costs = Vec::new();
+        let result = client
+            .explanation_observed(
+                &draft,
+                meta,
+                crate::explanation::Operation::Create,
+                "",
+                &mut MetaAttempt::new(|cost| {
+                    costs.push(cost);
+                    Ok(())
+                }),
+            )
+            .unwrap();
+        assert_eq!(
+            (
+                result.source_context(),
+                result.metadata_context(),
+                result.context_format(),
+                transport.requests.borrow().len(),
+                costs.len(),
+                draft.reviewed_senses().len()
+            ),
+            (
+                original,
+                original,
+                crate::vocabulary::ContextFormat::Legacy,
+                0,
+                0,
+                6
+            ),
+            "the six-sense fallback changed the source, dropped a sense or billed an explanation request"
+        );
+    }
+
+    fn explanation_config() -> Value {
+        let schema = serde_json::from_str(include_str!("../../assets/explanation.schema.json"))
+            .expect("explanation schema must decode");
+        serde_json::to_value(
+            GenerationConfig::json(schema)
+                .unwrap()
+                .with_thinking_level(ThinkingLevel::Low)
+                .with_max_output_tokens(3000),
+        )
+        .expect("explanation config must serialize")
+    }
+
+    #[test]
+    fn fresh_metadata_cannot_hide_creation_behind_its_nonempty_explanation_draft() {
+        let mut value = card_meta_response(sentence_labels_response(
+            "neutral",
+            "a2",
+            "statement",
+            Vec::new(),
+        ));
+        let context = "**Meaning.**\n- **a duck**\n- a false report\n\n**Usage.**\nAround ponds.\n\n**Limits.**\nNot other birds.\n\n**Nuance.**\nA water bird.";
+        value["source_context"] = json!(context);
+        let transport = FakeTransport::new(
+            [text_body(&value), phonetics_body(&value)]
+                .into_iter()
+                .chain((0..4).map(|_| unacceptable_explanation_body()))
+                .collect(),
+        );
+        let candidate = WordCandidate::with_senses(
+            "canard",
+            vec![Sense::plain("a duck"), Sense::plain("a false report")],
+            0,
+            true,
+        );
+        let draft = CardDraft::from_candidate(&candidate, 0, LanguagePair::new("FR", "EN"));
+        let meta = GeminiClient::new("key", transport.clone())
+            .generate_draft_meta_observed(&draft, None, |_| Ok(()))
+            .unwrap();
+        let requests = transport.requests.borrow();
+        let prompts = requests[2..]
+            .iter()
+            .map(|request| {
+                let request: Value = serde_json::from_str(request).unwrap();
+                let prompt = request["contents"][0]["parts"][0]["text"].as_str().unwrap();
+                let input = serde_json::Deserializer::from_str(
+                    prompt.split("Card input:\n").nth(1).unwrap(),
+                )
+                .into_iter::<Value>()
+                .next()
+                .unwrap()
+                .unwrap();
+                (
+                    prompt.contains("Operation: create."),
+                    input["old"].clone(),
+                    input["senses"].clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            (prompts, meta.source_context(), meta.metadata_context()),
+            (
+                vec![
+                    (
+                        true,
+                        value["source_context"].clone(),
+                        json!([
+                            {"number":"1","understanding":"a duck","label":""},
+                            {"number":"2","understanding":"a false report","label":""}
+                        ])
+                    );
+                    4
+                ],
+                context,
+                context
+            ),
+            "the real metadata path lost creation intent, reviewed senses, or its fallback draft"
+        );
+    }
+
+    #[test]
+    fn an_empty_correction_note_cannot_turn_a_revision_into_creation() {
+        let value = card_correction_response(sentence_labels_response(
+            "neutral",
+            "a2",
+            "statement",
+            Vec::new(),
+        ));
+        let transport = FakeTransport::new(
+            [text_body(&value), phonetics_body(&value)]
+                .into_iter()
+                .chain((0..4).map(|_| unacceptable_explanation_body()))
+                .collect(),
+        );
+        let pair = LanguagePair::new("FR", "EN");
+        let draft = CardDraft::new("canard", "a duck", pair.clone());
+        GeminiClient::new("key", transport.clone())
+            .correct_card_observed(&draft, "", &pair, |_| Ok(()))
+            .unwrap();
+        assert!(
+            transport.requests.borrow()[2..].iter().all(|request| {
+                let request: Value = serde_json::from_str(request).unwrap();
+                request["contents"][0]["parts"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Operation: revise.")
+            }),
+            "an empty correction note activated the fresh-card rule"
+        );
+    }
+
+    fn unacceptable_explanation_body() -> Result<TransportResponse> {
+        text_body(&json!({
+            "meanings": [], "literal": "",
+            "where": {"text": "", "example": {"text": "", "translation": ""}},
+            "limits": {"text": "", "example": {"text": "", "translation": ""}},
+            "nuance": {"text": "", "why": "", "example": {"text": "", "translation": ""}}
+        }))
+    }
+
+    fn metadata_fields(meta: &CardMeta) -> Value {
+        let mut fields = serde_json::to_value(meta).expect("metadata must serialize");
+        fields
+            .as_object_mut()
+            .expect("metadata must be an object")
+            .remove("explanation");
+        fields
     }
 
     fn sentence_labels_response(
@@ -3195,7 +3685,11 @@ mod tests {
             Vec::new(),
         ));
         response["source_context"] = json!(corpus_source_context(row_index * 6 + selected));
-        let transport = FakeTransport::new(vec![text_body(&response), phonetics_body(&response)]);
+        let transport = FakeTransport::new(vec![
+            text_body(&response),
+            phonetics_body(&response),
+            explanation_fallback_body(),
+        ]);
         let requests = transport.requests.clone();
         let client = GeminiClient::new("key", transport);
         let context = match client.generate_draft_meta_observed(&draft, None, |_| Ok(())) {
@@ -3358,12 +3852,16 @@ mod tests {
             FakeTransport::new(vec![
                 text_body(&metadata),
                 phonetics_body(&metadata),
+                explanation_fallback_body(),
                 text_body(&metadata),
                 phonetics_body(&metadata),
+                explanation_fallback_body(),
                 text_body(&correction),
                 phonetics_body(&correction),
+                explanation_fallback_body(),
                 text_body(&correction),
                 phonetics_body(&correction),
+                explanation_fallback_body(),
             ]),
         );
         let pair = LanguagePair::new("es", "en");
@@ -3388,7 +3886,7 @@ mod tests {
                 corrected_observed.is_ok(),
                 costs.len()
             ),
-            (true, true, true, true, 4),
+            (true, true, true, true, 6),
             "an ordinary English article caused a false rejection of Spanish destination metadata"
         );
     }
@@ -3410,12 +3908,16 @@ mod tests {
             FakeTransport::new(vec![
                 text_body(&metadata),
                 phonetics_body(&metadata),
+                explanation_fallback_body(),
                 text_body(&metadata),
                 phonetics_body(&metadata),
+                explanation_fallback_body(),
                 text_body(&correction),
                 phonetics_body(&correction),
+                explanation_fallback_body(),
                 text_body(&correction),
                 phonetics_body(&correction),
+                explanation_fallback_body(),
             ]),
         );
         let pair = LanguagePair::new("fr", "en");
@@ -3440,7 +3942,7 @@ mod tests {
                 corrected_observed.is_ok(),
                 costs.len()
             ),
-            (true, true, true, true, 4),
+            (true, true, true, true, 6),
             "an ordinary article already visible on the known-language face caused a false hint rejection"
         );
     }
@@ -3467,7 +3969,11 @@ mod tests {
         expected["transcription"] = json!("lə kanaʁ naʒ");
         let client = GeminiClient::new(
             "key",
-            FakeTransport::new(vec![text_body(&response), phonetics_body(&expected)]),
+            FakeTransport::new(vec![
+                text_body(&response),
+                phonetics_body(&expected),
+                explanation_fallback_body(),
+            ]),
         );
         let draft = CardDraft::new("canard", "a duck", LanguagePair::new("fr", "en"));
         let actual = client
@@ -3475,12 +3981,12 @@ mod tests {
             .expect("two-pass metadata must succeed");
         assert_eq!(
             (
-                serde_json::to_value(actual.0).expect("metadata must serialize"),
+                metadata_fields(&actual.0),
                 serde_json::to_value(actual.1).expect("cost must serialize")
             ),
             (
                 expected,
-                json!({"model":"gemini-3.8-flash","requests":2,"input_tokens":107,"output_tokens":64,"total_tokens":171,"cost":{"nanos":320250}})
+                json!({"model":"gemini-3.8-flash","requests":3,"input_tokens":112,"output_tokens":69,"total_tokens":181,"cost":{"nanos":342750}})
             ),
             "the IPA pass changed nonphonetic fields, lost label provenance, or miscounted one response"
         );
@@ -3523,8 +4029,11 @@ mod tests {
             serde_json::to_value(expected.meta()).expect("expected meta must serialize");
         expected_meta["pronunciation"] = json!("wa");
         expected_meta["transcription"] = json!("yn wa naʒ");
-        let transport =
-            FakeTransport::new(vec![text_body(&response), phonetics_body(&expected_meta)]);
+        let transport = FakeTransport::new(vec![
+            text_body(&response),
+            phonetics_body(&expected_meta),
+            explanation_fallback_body(),
+        ]);
         let requests = transport.requests.clone();
         let client = GeminiClient::new("key", transport);
         let actual = client
@@ -3538,7 +4047,7 @@ mod tests {
             (
                 actual.term(),
                 actual.understanding(),
-                serde_json::to_value(actual.meta()).expect("actual meta must serialize"),
+                metadata_fields(actual.meta()),
                 input
             ),
             (
@@ -3630,8 +4139,11 @@ mod tests {
                 "statement",
                 Vec::new(),
             ));
-            let transport =
-                FakeTransport::new(vec![text_body(&response), phonetics_body(&response)]);
+            let transport = FakeTransport::new(vec![
+                text_body(&response),
+                phonetics_body(&response),
+                explanation_fallback_body(),
+            ]);
             let requests = transport.requests.clone();
             let client = GeminiClient::new("key", transport);
             let draft = CardDraft::new("canard", "a duck", LanguagePair::new("fr", "en"));
@@ -3705,18 +4217,23 @@ mod tests {
         let transport = FakeTransport::new(vec![
             text_body(&metadata),
             phonetics_body(&metadata),
+            explanation_fallback_body(),
             text_body(&metadata),
             phonetics_body(&metadata),
+            explanation_fallback_body(),
             text_body(&correction),
             phonetics_body(&correction),
+            explanation_fallback_body(),
             text_body(&correction),
             phonetics_body(&correction),
+            explanation_fallback_body(),
             text_body(&json!("plain response")),
             text_body(&json!("intake response")),
             text_body(
                 &json!({"senses":[{"understanding":"a false report","tag":"journalism"}],"message":null}),
             ),
             phonetics_body(&metadata),
+            explanation_fallback_body(),
         ]);
         let requests = transport.requests.clone();
         let urls = transport.urls.clone();
@@ -3790,12 +4307,16 @@ mod tests {
                 vec![
                     json!({"responseMimeType": "application/json", "thinkingConfig": {"thinkingLevel": "HIGH"}}),
                     json!({"responseMimeType": "application/json", "thinkingConfig": {"thinkingLevel": "MEDIUM"}}),
+                    explanation_config(),
                     json!({"responseMimeType": "application/json", "thinkingConfig": {"thinkingLevel": "HIGH"}}),
                     json!({"responseMimeType": "application/json", "thinkingConfig": {"thinkingLevel": "MEDIUM"}}),
+                    explanation_config(),
                     json!({"responseMimeType": "application/json", "thinkingConfig": {"thinkingLevel": "HIGH"}}),
                     json!({"responseMimeType": "application/json", "thinkingConfig": {"thinkingLevel": "MEDIUM"}}),
+                    explanation_config(),
                     json!({"responseMimeType": "application/json", "thinkingConfig": {"thinkingLevel": "HIGH"}}),
                     json!({"responseMimeType": "application/json", "thinkingConfig": {"thinkingLevel": "MEDIUM"}}),
+                    explanation_config(),
                     Value::Null,
                     json!({"maxOutputTokens": INTAKE_MAX_OUTPUT_TOKENS}),
                     Value::Null,
@@ -3803,12 +4324,14 @@ mod tests {
                 ],
                 true,
                 vec![
-                    ("gemini-3.8-flash", 2, 320_250),
+                    ("gemini-3.8-flash", 3, 342_750),
                     ("gemini-3.8-flash", 1, 262_500),
                     ("gemini-3.8-flash", 1, 57_750),
-                    ("gemini-3.8-flash", 2, 320_250),
+                    ("gemini-3.8-flash", 1, 22_500),
+                    ("gemini-3.8-flash", 3, 342_750),
                     ("gemini-3.8-flash", 1, 262_500),
-                    ("gemini-3.8-flash", 1, 57_750)
+                    ("gemini-3.8-flash", 1, 57_750),
+                    ("gemini-3.8-flash", 1, 22_500)
                 ]
             ),
             "a text path used the wrong model, lost billed cost, or changed its thinking and format contract"
@@ -4018,7 +4541,11 @@ mod tests {
         );
         let client = GeminiClient::new(
             "key",
-            FakeTransport::new(vec![text_body(&response), phonetics_body(&response)]),
+            FakeTransport::new(vec![
+                text_body(&response),
+                phonetics_body(&response),
+                explanation_fallback_body(),
+            ]),
         );
         let meta = client
             .generate_draft_meta_observed(&draft, None, |_| Ok(()))
@@ -4058,7 +4585,11 @@ mod tests {
         response["source_context"] = json!(
             "**Meaning.**\n- model paraphrase\n\n**Usage.**\nA concrete situation.\n\n**Limits.**\nA supported boundary.\n\n**Nuance.**\nOne useful point."
         );
-        let transport = FakeTransport::new(vec![text_body(&response), phonetics_body(&response)]);
+        let transport = FakeTransport::new(vec![
+            text_body(&response),
+            phonetics_body(&response),
+            explanation_fallback_body(),
+        ]);
         let requests = transport.requests.clone();
         let client = GeminiClient::new("key", transport);
         let revision = client
@@ -4166,7 +4697,11 @@ mod tests {
         response["source_context"] = json!(
             "**Meaning.**\n- paraphrased bird\nrelationship: the news use is figurative while the bird is concrete.\n\n**Where you'll hear it.**\nNewsrooms and ponds.\n\n**Where it's out of place.**\nChoose the precise noun in formal copy.\n\n**Subtlety.**\nThe article determines the reading."
         );
-        let transport = FakeTransport::new(vec![text_body(&response), phonetics_body(&response)]);
+        let transport = FakeTransport::new(vec![
+            text_body(&response),
+            phonetics_body(&response),
+            explanation_fallback_body(),
+        ]);
         let requests = transport.requests.clone();
         let client = GeminiClient::new("key", transport);
         let candidate = WordCandidate::with_senses(
@@ -4209,7 +4744,7 @@ mod tests {
                     {"understanding":"a duck", "tag":null},
                     {"understanding":"an unfounded rumour", "tag":null},
                 ])
-                && costs.len() == 2,
+                && costs.len() == 3,
             "contextual metadata request or normalized reply lost the complete reviewed-sense contract"
         );
     }
@@ -4527,6 +5062,7 @@ mod tests {
                 }
             })),
             phonetics_body(&json!({"pronunciation":"waʊnd", "transcription":"aɪ waʊnd ðə klɒk"})),
+            explanation_fallback_body(),
         ]);
         let client = GeminiClient::new("key", transport);
         let draft = CardDraft::new("wound", "noun sense", LanguagePair::new("en", "ru"));
@@ -4535,7 +5071,7 @@ mod tests {
             .expect("card correction must decode");
         assert_eq!(
             cost.cost().nanos(),
-            320_250,
+            342_750,
             "card correction must preserve Gemini usage cost for the regenerated meta"
         );
     }
