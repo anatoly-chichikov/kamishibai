@@ -99,7 +99,9 @@ jobs:
           cmp llms.txt embedded-llms.txt
       - name: Package binary and third-party notices
         shell: bash
-        run: python3 tools/package_release.py "${{ matrix.target }}" "${KAMISHIBAI_ARCHIVE}"
+        env:
+          RELEASE_PYTHON: ${{ runner.os == 'Windows' && 'python' || 'python3' }}
+        run: '"${RELEASE_PYTHON}" tools/package_release.py "${{ matrix.target }}" "${KAMISHIBAI_ARCHIVE}"'
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
