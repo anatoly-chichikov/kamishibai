@@ -41,10 +41,10 @@ def licenses(package: Package) -> list[Path]:
     """Find the crate's declared license and notices, including vendored components."""
     source = Path(package["manifest_path"]).parent
     pattern = re.compile(
-        r"^(?:licen[cs]es?|copying|copyright|notices?|unlicense|ofl|patents)(?:$|[-._])",
+        r"license|copying|notice|^(?:licences?|copyright|ofl|patents)(?:$|[-._])",
         re.IGNORECASE,
     )
-    files = {p for p in source.rglob("*") if pattern.match(p.name) and p.is_file()}
+    files = {p for p in source.rglob("*") if pattern.search(p.name) and p.is_file()}
     if declared := package["license_file"]:
         files.add(source / declared)
     return sorted(files)

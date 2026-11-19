@@ -27,3 +27,7 @@ allow	ru	en	publish	выпустить	People will publish the interview tomorro
 deny	ru	en	person	человек	The People waited for another train.	У платформы People ждали другой поезд.	ждали
 deny	fr	en	child	enfant	The CHILDREN met before the concert.	Les voisins ont vu les children avant le concert.	voisins
 allow	ru	en	the Big Apple	Нью-Йорк	The Big Apple, or NYC, hosts the marathon every year.	В NYC каждый год проходит марафон.	NYC
+deny	de	pl	dziecko	Kind	Dzieci czekały rano przed szkołą, ale jedno dziecko przyszło za późno.	Die Dzieci warteten morgens vor der Schule, aber ein Kind kam zu spät.	Kind
+deny	ru	it	uomo	мужчина	Uomini e donne aspettavano l'autobus davanti alla scuola, ma un uomo era già salito.	UOMINI и женщины ждали автобус возле школы, но один мужчина уже сел в автобус.	мужчина
+deny	el	en	bad	κακός	Worse conditions forced the climbers to turn back before the weather got really bad.	WORSE συνθήκες ανάγκασαν τους ορειβάτες να γυρίσουν πίσω προτού ο καιρός γίνει πραγματικά κακός.	κακός
+deny	uk	fr	cheval	кінь	Les chevaux attendaient près de la rivière avant la course, mais un cheval est parti sans cavalier.	Chevaux чекали біля річки перед перегонами, але один кінь помчав без вершника.	кінь

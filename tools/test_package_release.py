@@ -43,6 +43,15 @@ def test_release_archives_cannot_lose_an_embedded_license_or_notice(
     (tmp_path / "reader" / "algorithms" / "NOTICE").write_text(
         "original algorithm credit", encoding="utf-8"
     )
+    resources = tmp_path / "reader" / "src" / "res"
+    resources.mkdir()
+    (resources / "CoatedFOGRA39.icc.LICENSE.txt").write_text(
+        "profile distribution terms", encoding="utf-8"
+    )
+    (resources / "data.copying.txt").write_text(
+        "data distribution terms", encoding="utf-8"
+    )
+    (resources / "font.NOTICE.txt").write_text("font credit", encoding="utf-8")
     (tmp_path / "reader" / "PATENTS").write_bytes(
         "grant to “Affiliate”".encode("windows-1252")
     )
@@ -67,5 +76,10 @@ def test_release_archives_cannot_lose_an_embedded_license_or_notice(
         and "reader 0.1.0 / LICENSE\n\nupstream permission" in bundle
         and "reader 0.1.0 / algorithms/NOTICE\n\noriginal algorithm credit" in bundle
         and "reader 0.1.0 / PATENTS\n\ngrant to “Affiliate”" in bundle
+        and "reader 0.1.0 / src/res/CoatedFOGRA39.icc.LICENSE.txt\n\nprofile distribution terms"
+        in bundle
+        and "reader 0.1.0 / src/res/data.copying.txt\n\ndata distribution terms"
+        in bundle
+        and "reader 0.1.0 / src/res/font.NOTICE.txt\n\nfont credit" in bundle
         and "fixture 0.1.0" not in bundle
     ), "the archive lost a release member or distributed the wrong component notices"

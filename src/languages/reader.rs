@@ -202,6 +202,7 @@ fn paradigms(code: &str) -> &'static [&'static [&'static str]] {
         ]],
         "de" => &[&["datum", "daten"]],
         "en" => &[
+            &["bad", "worse", "worst"],
             &["person", "people"],
             &["child", "children"],
             &["man", "men"],
@@ -215,16 +216,20 @@ fn paradigms(code: &str) -> &'static [&'static [&'static str]] {
         "it" => &[
             &["buono", "buona", "migliore", "migliori"],
             &["cattivo", "peggiore", "peggiori"],
+            &["uomo", "uomini"],
         ],
         "nl" => &[&["zijn", "ben", "bent", "is", "was", "waren", "geweest"]],
-        "pl" => &[&[
-            "człowiek",
-            "ludzie",
-            "ludzi",
-            "ludziom",
-            "ludźmi",
-            "ludziach",
-        ]],
+        "pl" => &[
+            &[
+                "człowiek",
+                "ludzie",
+                "ludzi",
+                "ludziom",
+                "ludźmi",
+                "ludziach",
+            ],
+            &["dziecko", "dzieci", "dzieciom", "dziećmi", "dzieciach"],
+        ],
         "ru" => &[&["человек", "люди", "людей", "людям", "людьми", "людях"]],
         "tr" => &[&["gitmek", "git", "gidiyor", "gider", "gitti", "gidecek"]],
         _ => &[],
