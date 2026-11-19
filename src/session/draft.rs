@@ -502,11 +502,18 @@ pub struct CardMeta {
     source_highlight: String,
     source_hint: String,
     source_context: String,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::vocabulary::ContextFormat::is_legacy"
+    )]
+    context_format: crate::vocabulary::ContextFormat,
     target_sentence: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     labels: Option<SentenceLabels>,
     #[serde(default, skip_serializing_if = "generated_meta")]
     rewritten: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    explanation: Option<Box<crate::explanation::Record>>,
 }
 
 fn generated_meta(rewritten: &bool) -> bool {
@@ -537,9 +544,11 @@ impl CardMeta {
             source_highlight: source_highlight.into(),
             source_hint: source_hint.into(),
             source_context: source_context.into(),
+            context_format: crate::vocabulary::ContextFormat::Legacy,
             target_sentence: target_sentence.into(),
             labels: None,
             rewritten: false,
+            explanation: None,
         }
     }
 
@@ -581,6 +590,44 @@ impl CardMeta {
     /// Return the multi-sentence usage explanation in source language.
     pub fn source_context(&self) -> &str {
         self.source_context.as_str()
+    }
+
+    /// Resolve accepted provenance or the explicit format imported with a cards document.
+    #[must_use]
+    pub fn context_format(&self) -> crate::vocabulary::ContextFormat {
+        self.explanation
+            .as_deref()
+            .map_or(self.context_format, crate::explanation::Record::format)
+    }
+
+    /// Retain an imported context's explicit rendering contract through sessions and cache.
+    #[must_use]
+    pub fn with_context_format(mut self, format: crate::vocabulary::ContextFormat) -> Self {
+        self.context_format = format;
+        self
+    }
+
+    /// Recover the original metadata explanation for a correction rather than its rewrite.
+    #[must_use]
+    pub fn metadata_context(&self) -> &str {
+        self.explanation
+            .as_deref()
+            .map_or(&self.source_context, crate::explanation::Record::metadata)
+    }
+
+    /// Preserve the explanation assignment and draft alongside the displayed context.
+    #[must_use]
+    pub fn with_explanation(mut self, record: Option<crate::explanation::Record>) -> Self {
+        if let Some(record) = &record {
+            self.context_format = record.format();
+        }
+        self.explanation = record.map(Box::new);
+        self
+    }
+
+    /// Copy optional explanation provenance into the metadata cache record.
+    pub(crate) fn explanation_record(&self) -> Option<crate::explanation::Record> {
+        self.explanation.as_deref().cloned()
     }
 
     /// Return the metadata with a locally normalized usage explanation installed.

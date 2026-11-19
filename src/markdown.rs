@@ -10,8 +10,42 @@
 //!   ITALIC modifiers, bullets get a `•` glyph prefix and a left indent).
 //! - `to_plain` for legacy text reports that cannot render any styling.
 
+use crate::vocabulary::ContextFormat;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+
+impl ContextFormat {
+    /// Apply only the normalization belonging to this persisted format.
+    #[must_use]
+    pub fn compact(self, input: &str) -> String {
+        match self {
+            Self::Legacy => compact_card_context(input),
+            Self::ExplanationV1 => input.to_string(),
+        }
+    }
+
+    /// Parse a context without guessing its format from Markdown content.
+    #[must_use]
+    pub fn parse(self, input: &str) -> Vec<Block> {
+        parse_markdown(&self.compact(input))
+    }
+
+    /// Render the persisted format into its exact Anki note field.
+    #[must_use]
+    pub fn html(self, input: &str) -> String {
+        let blocks = self.parse(input);
+        match self {
+            Self::Legacy => to_html(&blocks),
+            Self::ExplanationV1 => explanation_html(&blocks),
+        }
+    }
+
+    /// Project a context into terminal spans using its explicit format.
+    #[must_use]
+    pub fn terminal(self, input: &str) -> Vec<Line<'static>> {
+        terminal(&self.parse(input), self == Self::ExplanationV1)
+    }
+}
 
 /// One styled run inside a paragraph or bullet line.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -231,13 +265,82 @@ pub fn to_html(blocks: &[Block]) -> String {
 /// `• ` glyph and a two-space-per-level left indent.
 #[must_use]
 pub fn to_ratatui(blocks: &[Block]) -> Vec<Line<'static>> {
+    terminal(blocks, false)
+}
+
+fn terminal(blocks: &[Block], explanation: bool) -> Vec<Line<'static>> {
+    let mut order = 0;
     blocks
         .iter()
         .map(|block| match block {
             Block::Paragraph(chunks) => paragraph_line(chunks),
-            Block::Bullet { indent, chunks } => bullet_line(*indent, chunks),
+            Block::Bullet { indent, chunks } => {
+                let mut line = bullet_line(*indent, chunks);
+                if explanation {
+                    let color = if order == 0 {
+                        ratatui::style::Color::Rgb(0xe6, 0xe3, 0xda)
+                    } else {
+                        ratatui::style::Color::Rgb(0x8b, 0x8a, 0x83)
+                    };
+                    for span in &mut line.spans {
+                        span.style = span.style.fg(color);
+                    }
+                }
+                order += 1;
+                line
+            }
         })
         .collect()
+}
+
+fn explanation_html(blocks: &[Block]) -> String {
+    let mut output = String::new();
+    let mut list = false;
+    let mut order = 0;
+    for block in blocks {
+        match block {
+            Block::Bullet { chunks, .. } => {
+                if !list {
+                    output.push_str(
+                        "<ul style=\"margin: 0.45em 0; padding-left: 1.2em; line-height: 1.5;\">",
+                    );
+                    list = true;
+                    order = 0;
+                }
+                let color = if order == 0 {
+                    "--kamishibai-term"
+                } else {
+                    "--kamishibai-hint"
+                };
+                output.push_str(&format!("<li style=\"color: var({color}, inherit);\">"));
+                push_html_chunks(&mut output, chunks);
+                output.push_str("</li>");
+                order += 1;
+            }
+            Block::Paragraph(chunks) => {
+                if list {
+                    output.push_str("</ul>");
+                    list = false;
+                }
+                let text = chunks
+                    .iter()
+                    .map(|chunk| chunk.text.as_str())
+                    .collect::<String>();
+                if text.trim_start().starts_with(['—', '–']) && output.ends_with("</p>") {
+                    output.truncate(output.len() - 4);
+                    output.push_str("<br>");
+                } else {
+                    output.push_str("<p style=\"margin: 0.55em 0; line-height: 1.5;\">");
+                }
+                push_html_chunks(&mut output, chunks);
+                output.push_str("</p>");
+            }
+        }
+    }
+    if list {
+        output.push_str("</ul>");
+    }
+    output
 }
 
 /// Render markdown blocks back into plain text, stripping every styling

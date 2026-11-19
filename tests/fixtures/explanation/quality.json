@@ -1,0 +1,792 @@
+[
+  {
+    "job": {
+      "id": "lang-hi-1",
+      "group": "languages",
+      "known": "hi",
+      "learning": "hu",
+      "concept": "cat",
+      "card": {
+        "term": "macska",
+        "translation": "बिल्ली",
+        "sentence": "A macska alszik.",
+        "senses": [
+          {
+            "number": "1",
+            "understanding": "बिल्ली",
+            "label": ""
+          }
+        ]
+      },
+      "sentence_known": "बिल्ली सो रही है।",
+      "old": ""
+    },
+    "attempts": [
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "बिल्ली",
+            "note": "पालतू या गली का जानवर"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "",
+          "why": ""
+        },
+        "where": {
+          "example": {
+            "text": "A fekete macska a kanapén ül.",
+            "translation": "काली बिल्ली सोफ़े पर बैठी है।"
+          },
+          "text": "घर में और जानवरों के डॉक्टर के पास। अक्सर ⟦fekete macska⟧ या ⟦kismacska⟧ जैसे शब्दों के साथ सुनेंगे।"
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "बिल्ली",
+            "note": "मूँछें, पंजे और दूध"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "",
+          "why": ""
+        },
+        "where": {
+          "example": {
+            "text": "A fekete macska a kanapén ül.",
+            "translation": "काली बिल्ली सोफ़े पर बैठी है।"
+          },
+          "text": "घर में और पार्क में। अक्सर ⟦fekete macska⟧ कहते हैं।"
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "बिल्ली",
+            "note": "मूँछें, पंजे और दूध"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "",
+          "why": ""
+        },
+        "where": {
+          "example": {
+            "text": "A fekete macska a kanapén ül.",
+            "translation": "काली बिल्ली सोफ़े पर बैठी है।"
+          },
+          "text": "घर में और पार्क में। अक्सर ⟦fekete macska⟧ कहते हैं।"
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "बिल्ली",
+            "note": "घर का पालतू जानवर"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "",
+          "why": ""
+        },
+        "where": {
+          "example": {
+            "text": "A fekete macska a kanapén ül.",
+            "translation": "काली बिल्ली सोफ़े पर बैठी है।"
+          },
+          "text": "घर में और पार्क में। अक्सर ⟦fekete macska⟧ कहते हैं।"
+        }
+      }
+    ]
+  },
+  {
+    "job": {
+      "id": "lang-hi-2",
+      "group": "languages",
+      "known": "hi",
+      "learning": "ru",
+      "concept": "water",
+      "card": {
+        "term": "вода",
+        "translation": "पानी",
+        "sentence": "Я пью воду.",
+        "senses": [
+          {
+            "number": "1",
+            "understanding": "पानी",
+            "label": ""
+          }
+        ]
+      },
+      "sentence_known": "मैं पानी पीता हूँ।",
+      "old": ""
+    },
+    "attempts": [
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "पानी",
+            "note": "पीने, नहाने और खाना पकाने के लिए"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "Я хочу воды.",
+            "translation": "मुझे थोड़ा पानी चाहिए।"
+          },
+          "text": "पीने के लिए माँगते समय ⟦хочу воды⟧ कहते हैं, ⟦хочу воду⟧ कम स्वाभाविक लगता है।",
+          "why": "⟦воды⟧ बताता है कि थोड़े से पानी की ज़रूरत है।"
+        },
+        "where": {
+          "example": {
+            "text": "Дайте, пожалуйста, стакан воды.",
+            "translation": "कृपया एक गिलास पानी दीजिए।"
+          },
+          "text": "दुकान, कैफ़े या घर पर। अक्सर ⟦пить воду⟧ या ⟦стакан воды⟧ के साथ सुनेंगे।"
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "पानी",
+            "note": "कुएँ, नल, नदी या बोतल में"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "Я хочу воды.",
+            "translation": "मुझे पानी चाहिए।"
+          },
+          "text": "माँगते समय ⟦хочу воды⟧ कहते हैं, ⟦хочу воду⟧ नहीं।",
+          "why": "⟦воды⟧ बताता है कि थोड़े पानी की ज़रूरत है।"
+        },
+        "where": {
+          "example": {
+            "text": "Дайте, пожалуйста, стакан воды.",
+            "translation": "कृपया एक गिलास पानी दीजिए।"
+          },
+          "text": "दुकान, कैफ़े या घर पर। अक्सर ⟦стакан воды⟧ के साथ सुनेंगे।"
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "पानी",
+            "note": "कुएँ, नल, नदी या बोतल में"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "Я хочу воды.",
+            "translation": "मुझे पानी चाहिए।"
+          },
+          "text": "माँगते समय ⟦хочу воды⟧ कहते हैं, ⟦хочу воду⟧ नहीं।",
+          "why": "⟦воды⟧ बताता है कि थोड़े पानी की ज़रूरत है।"
+        },
+        "where": {
+          "example": {
+            "text": "Дайте, пожалуйста, стакан воды.",
+            "translation": "कृपया एक गिलास पानी दीजिए।"
+          },
+          "text": "दुकान, कैफ़े या घर पर। अक्सर ⟦стакан воды⟧ के साथ सुनेंगे।"
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "पानी",
+            "note": "पीने, नहाने या खाना पकाने के लिए"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "Я хочу воды.",
+            "translation": "मुझे थोड़ा पानी चाहिए।"
+          },
+          "text": "माँगते समय ⟦хочу воды⟧ कहते हैं, ⟦хочу воду⟧ नहीं।",
+          "why": "⟦воды⟧ बताता है कि थोड़े पानी की ज़रूरत है।"
+        },
+        "where": {
+          "example": {
+            "text": "Дайте, пожалуйста, стакан воды.",
+            "translation": "कृपया एक गिलास पानी दीजिए।"
+          },
+          "text": "दुकान, कैफ़े या घर पर। अक्सर ⟦стакан воды⟧ के साथ सुनेंगे।"
+        }
+      }
+    ]
+  },
+  {
+    "job": {
+      "id": "lang-ko-1",
+      "group": "languages",
+      "known": "ko",
+      "learning": "la",
+      "concept": "cat",
+      "card": {
+        "term": "feles",
+        "translation": "고양이",
+        "sentence": "Feles dormit.",
+        "senses": [
+          {
+            "number": "1",
+            "understanding": "고양이",
+            "label": ""
+          }
+        ]
+      },
+      "sentence_known": "고양이가 자요.",
+      "old": ""
+    },
+    "attempts": [
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "고양이",
+            "note": "집에서 기르는 짐승이나 쥐를 잡는 짐승"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "",
+          "why": ""
+        },
+        "where": {
+          "example": {
+            "text": "Feles murem capit.",
+            "translation": "고양이가 쥐를 잡아요."
+          },
+          "text": "집 안에서 반려동물을 부를 때나 옛날 우화에서 쥐와 함께 나오는 이야기에서 자주 보게 돼요."
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "고양이",
+            "note": "털 빗기기, 낮잠, 쥐잡기"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "",
+          "why": ""
+        },
+        "where": {
+          "example": {
+            "text": "Feles murem capit.",
+            "translation": "고양이가 쥐를 잡아요."
+          },
+          "text": "집 안에서 반려동물을 부를 때나 옛날 우화에서 쥐와 함께 나오는 이야기에서 자주 보게 돼요."
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "고양이",
+            "note": "털 빗기기, 낮잠, 쥐잡기"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "",
+          "why": ""
+        },
+        "where": {
+          "example": {
+            "text": "Feles murem capit.",
+            "translation": "고양이가 쥐를 잡아요."
+          },
+          "text": "집에서 반려동물을 부를 때나 옛날 우화에서 쥐와 함께 나오는 이야기에서 자주 보게 돼요."
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "고양이",
+            "note": "지붕 위, 마당, 골골송"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "",
+          "why": ""
+        },
+        "where": {
+          "example": {
+            "text": "Feles murem capit.",
+            "translation": "고양이가 쥐를 잡아요."
+          },
+          "text": "집 안이나 마당에서 작은 짐승을 볼 때, 또는 옛 우화에서 쥐와 함께 나오는 이야기에서 자주 보게 돼요."
+        }
+      }
+    ]
+  },
+  {
+    "job": {
+      "id": "lang-ko-2",
+      "group": "languages",
+      "known": "ko",
+      "learning": "zh",
+      "concept": "water",
+      "card": {
+        "term": "水",
+        "translation": "물",
+        "sentence": "我喝水。",
+        "senses": [
+          {
+            "number": "1",
+            "understanding": "물",
+            "label": ""
+          }
+        ]
+      },
+      "sentence_known": "물을 마셔요.",
+      "old": ""
+    },
+    "attempts": [
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "물",
+            "note": "마시는 물, 강이나 바다의 물"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "",
+          "why": ""
+        },
+        "where": {
+          "example": {
+            "text": "请给我一杯水。",
+            "translation": "물 한 잔 주세요."
+          },
+          "text": "식당이나 카페에서 주문할 때, 집에서 마실 것을 찾을 때 자주 써요. ⟦喝水⟧나 ⟦热水⟧처럼 자주 붙여 말해요."
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "물",
+            "note": "목마를 때 마시는 것, 세수하거나 빨래할 때 쓰는 액체"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "",
+          "why": ""
+        },
+        "where": {
+          "example": {
+            "text": "请给我一杯水。",
+            "translation": "물 한 잔 주세요."
+          },
+          "text": "식당이나 카페에서 주문할 때, 집에서 마실 것을 찾을 때 자주 써요. ⟦喝水⟧나 ⟦热水⟧처럼 자주 붙여 말해요."
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "물",
+            "note": "목마를 때 마시는 물이나 씻을 때 쓰는 물"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "",
+          "why": ""
+        },
+        "where": {
+          "example": {
+            "text": "请给我一杯水。",
+            "translation": "물 한 잔 주세요."
+          },
+          "text": "식당이나 카페에서 주문할 때, 집에서 마실 것을 찾을 때 자주 써요. ⟦喝水⟧나 ⟦热水⟧처럼 자주 붙여 말해요."
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "물",
+            "note": "생수, 찻물, 씻는 수돗물"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "",
+          "why": ""
+        },
+        "where": {
+          "example": {
+            "text": "请给我一杯水。",
+            "translation": "물 한 잔 주세요."
+          },
+          "text": "식당이나 카페에서 주문할 때, 집에서 마실 것을 찾을 때 자주 써요. ⟦喝水⟧나 ⟦热水⟧처럼 자주 붙여 말해요."
+        }
+      }
+    ]
+  },
+  {
+    "job": {
+      "id": "lang-sr-2",
+      "group": "languages",
+      "known": "sr",
+      "learning": "fa",
+      "concept": "water",
+      "card": {
+        "term": "آب",
+        "translation": "voda",
+        "sentence": "من آب می‌نوشم.",
+        "senses": [
+          {
+            "number": "1",
+            "understanding": "voda",
+            "label": ""
+          }
+        ]
+      },
+      "sentence_known": "Pijem vodu.",
+      "old": ""
+    },
+    "attempts": [
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "voda",
+            "note": "za piće, u čaši, rekama i moru"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "آب می‌خوری؟",
+            "translation": "Piješ li vodu?"
+          },
+          "text": "U svakodnevnom govoru za pijenje vode kaže se ⟦آب خوردن⟧, a ne ⟦آب نوشیدن⟧.",
+          "why": "⟦نوشیدن⟧ zvuči previše svečano i knjiški za običan razgovor."
+        },
+        "where": {
+          "example": {
+            "text": "یک لیوان آب لطفا.",
+            "translation": "Čašu vode, molim vas."
+          },
+          "text": "Za stolom, u restoranu i prodavnici. Često ide uz glagole ⟦خوردن⟧ i ⟦نوشیدن⟧."
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "voda",
+            "note": "za piće, u čaši, rekama i moru"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "آب می‌خوری؟",
+            "translation": "Piješ li vodu?"
+          },
+          "text": "U svakodnevnom govoru reći ćeš ⟦آb خوردن⟧, a ne ⟦آb نوشیدن⟧.",
+          "why": "⟦نوشیدن⟧ zvuči previše svečano za običan razgovor."
+        },
+        "where": {
+          "example": {
+            "text": "یک لیوان آب لطفا.",
+            "translation": "Čašu vode, molim vas."
+          },
+          "text": "Za stolom, u restoranu i prodavnici. Čućeš je uz ⟦خوردن⟧ i ⟦نوشیدن⟧."
+        }
+      }
+    ]
+  },
+  {
+    "job": {
+      "id": "lang-vi-2",
+      "group": "languages",
+      "known": "vi",
+      "learning": "hu",
+      "concept": "water",
+      "card": {
+        "term": "víz",
+        "translation": "nước",
+        "sentence": "Vizet iszom.",
+        "senses": [
+          {
+            "number": "1",
+            "understanding": "nước",
+            "label": ""
+          }
+        ]
+      },
+      "sentence_known": "Tôi uống nước.",
+      "old": ""
+    },
+    "attempts": [
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "nước",
+            "note": "uống, sông hồ, mưa"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "Khi uống nước, người ta nói ⟦vizet iszom⟧, chứ không nói ⟦vízet iszom⟧.",
+          "why": "⟦vizet⟧ rút ngắn nguyên âm khi thêm đuôi."
+        },
+        "where": {
+          "example": {
+            "text": "Kérek egy pohár vizet.",
+            "translation": "Cho tôi xin một cốc nước."
+          },
+          "text": "Ở quán ăn và trong bếp, người ta hay gọi ⟦egy pohár víz⟧ hoặc ⟦hideg víz⟧."
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "nước",
+            "note": "uống, sông hồ, mưa"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "Khi uống nước, người ta nói ⟦vizet iszom⟧, chứ không nói ⟦vízet iszom⟧.",
+          "why": "Từ ⟦víz⟧ đổi thành ⟦vizet⟧ và đọc âm ngắn hơn."
+        },
+        "where": {
+          "example": {
+            "text": "Kérek một cốc nước.",
+            "translation": "Cho tôi xin một cốc nước."
+          },
+          "text": "Ở quán ăn và trong bếp, người ta hay gọi ⟦egy pohár víz⟧ hoặc ⟦hideg víz⟧."
+        }
+      }
+    ]
+  }
+]

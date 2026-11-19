@@ -366,6 +366,31 @@ mod tests {
     }
 
     #[test]
+    fn old_cached_metadata_cannot_buy_an_explanation_or_change_its_bytes() {
+        let root = TempDir::new().unwrap();
+        let production = production(root.path());
+        let pair = LanguagePair::new("FR", "EN");
+        let old = meta("Le canard nage");
+        let file = production.store("canard", "a duck", &pair, &old).unwrap();
+        let cell = CardCell::new(root.path(), &pair, "canard", "a duck");
+        let path = cell.cache().filepath(META_FILE).unwrap();
+        let before = fs::read(&path).unwrap();
+        let (result, cost) = production
+            .generate("canard", "a duck", &pair, None, None)
+            .into_parts();
+        assert_eq!(
+            (
+                result.unwrap().0,
+                cost,
+                fs::read(path).unwrap(),
+                file.cached()
+            ),
+            (old, None, before, false),
+            "a cache hit required a provider, spent money, or rewrote legacy metadata"
+        );
+    }
+
+    #[test]
     fn replaced_metadata_cannot_reuse_media_from_the_previous_sentence() {
         let root = TempDir::new().expect("temporary cache must exist");
         let production = production(root.path());

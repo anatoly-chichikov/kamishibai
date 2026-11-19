@@ -16,8 +16,8 @@ use printpdf::{
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::languages::{TextDirection, language};
-use crate::markdown::{Block, TextChunk, parse_card_context};
-use crate::vocabulary::VocabularyEntry;
+use crate::markdown::{Block, TextChunk};
+use crate::vocabulary::{ContextFormat, VocabularyEntry};
 
 use super::Thumbnail;
 use super::font::{carries, font_arc, leading, shaping_font_arc};
@@ -503,7 +503,7 @@ fn back_rows(plan: &CardPlan, size: f32, fonts: &SheetFonts, padding: f32) -> Ve
         gap: leading(IMP_SIZE) * 0.4,
         direction: plan.source_direction,
     });
-    let explanation = explanation_layout(&plan.explanation, width, size, view);
+    let explanation = explanation_layout(&plan.explanation, plan.context_format, width, size, view);
     rows.extend(
         explanation
             .rows
@@ -512,7 +512,7 @@ fn back_rows(plan: &CardPlan, size: f32, fonts: &SheetFonts, padding: f32) -> Ve
             .map(|(index, row)| FaceRow {
                 content: RowContent::Text {
                     chunks: row.chunks,
-                    color: INK,
+                    color: row.color,
                     bullet: row.bullet,
                 },
                 size,
@@ -677,14 +677,23 @@ fn bullet_gutter(
 /// Wrap every explanation block into immutable rows before rendering begins.
 fn explanation_layout(
     blocks: &[Block],
+    format: ContextFormat,
     width: f32,
     size: f32,
     view: ClassifierView<'_>,
 ) -> ExplanationLayout {
     let marker_width = view.measure(BULLET_MARKER, false, size);
     let mut rows = Vec::new();
+    let explanation = format == ContextFormat::ExplanationV1;
+    let mut order = 0;
     for (index, block) in blocks.iter().enumerate() {
-        let gap_before = explanation_gap(blocks.get(index.wrapping_sub(1)), block, size);
+        let gap_before = if explanation
+            && matches!(block, Block::Paragraph(chunks) if chunks.first().is_some_and(|chunk| chunk.text.trim_start().starts_with(['—', '–'])))
+        {
+            0.0
+        } else {
+            explanation_gap(blocks.get(index.wrapping_sub(1)), block, size)
+        };
         let (chunks, inner_w, indent) = match block {
             Block::Paragraph(chunks) => (chunks.as_slice(), width, None),
             Block::Bullet { indent, chunks } => {
@@ -696,13 +705,27 @@ fn explanation_layout(
                 )
             }
         };
-        for (line_index, chunks) in wrap_runs(chunks, inner_w, size, view)
-            .into_iter()
-            .enumerate()
+        let color = if explanation && indent.is_some() && order > 0 {
+            MUTED
+        } else {
+            INK
+        };
+        if indent.is_some() {
+            order += 1;
+        }
+        for (line_index, chunks) in wrap_groups(
+            group_tokens(tokenize_for(chunks, format)),
+            inner_w,
+            size,
+            view,
+        )
+        .into_iter()
+        .enumerate()
         {
             let gap = if line_index == 0 { gap_before } else { 0.0 };
             rows.push(ExplanationRow {
                 chunks,
+                color,
                 gap_before: gap,
                 bullet: indent.map(|value| BulletLead {
                     indent: value,
@@ -732,6 +755,7 @@ struct ExplanationLayout {
 #[derive(Clone, Debug)]
 struct ExplanationRow {
     chunks: Vec<TextChunk>,
+    color: (u8, u8, u8),
     gap_before: f32,
     bullet: Option<BulletLead>,
 }
@@ -756,6 +780,7 @@ struct CardPlan {
     meaning: String,
     importance: u8,
     explanation: Vec<Block>,
+    context_format: ContextFormat,
 }
 
 impl CardPlan {
@@ -786,7 +811,11 @@ impl CardPlan {
             lemma_ipa: pronounce(entry.pronunciation.as_str()),
             meaning: entry.meaning.as_str().to_string(),
             importance: entry.importance.value(),
-            explanation: parse_card_context(entry.source.context.as_str()),
+            explanation: entry
+                .source
+                .context_format
+                .parse(entry.source.context.as_str()),
+            context_format: entry.source.context_format,
         }
     }
 
@@ -1450,7 +1479,15 @@ fn wrap_runs(
     size: f32,
     view: ClassifierView<'_>,
 ) -> Vec<Vec<TextChunk>> {
-    let groups = group_tokens(tokenize(runs));
+    wrap_groups(group_tokens(tokenize(runs)), width, size, view)
+}
+
+fn wrap_groups(
+    groups: Vec<(bool, Vec<TextChunk>)>,
+    width: f32,
+    size: f32,
+    view: ClassifierView<'_>,
+) -> Vec<Vec<TextChunk>> {
     let mut lines: Vec<Vec<TextChunk>> = Vec::new();
     let mut current: Vec<TextChunk> = Vec::new();
     let mut current_width = 0.0_f32;
@@ -1536,14 +1573,27 @@ struct WrapToken {
 /// wrap has real break points inside scripts that do not use spaces between
 /// words.
 fn tokenize(runs: &[TextChunk]) -> Vec<WrapToken> {
+    tokenize_for(runs, ContextFormat::Legacy)
+}
+
+fn tokenize_for(runs: &[TextChunk], format: ContextFormat) -> Vec<WrapToken> {
+    let space = |ch: char| {
+        ch.is_whitespace()
+            && (format == ContextFormat::Legacy || !matches!(ch, '\u{a0}' | '\u{202f}'))
+    };
     let mut tokens = Vec::new();
     let mut prev_open = false;
     for chunk in runs {
         if chunk.text.is_empty() {
             continue;
         }
-        let starts_ws = chunk.text.starts_with(char::is_whitespace);
-        for (index, word) in chunk.text.split_whitespace().enumerate() {
+        let starts_ws = chunk.text.starts_with(space);
+        for (index, word) in chunk
+            .text
+            .split(space)
+            .filter(|word| !word.is_empty())
+            .enumerate()
+        {
             let space_before = if tokens.is_empty() {
                 false
             } else if index == 0 {
@@ -1558,7 +1608,7 @@ fn tokenize(runs: &[TextChunk]) -> Vec<WrapToken> {
                 space_before,
             }));
         }
-        prev_open = !chunk.text.ends_with(char::is_whitespace);
+        prev_open = !chunk.text.ends_with(space);
     }
     tokens
 }
@@ -1644,7 +1694,12 @@ fn group_tokens(tokens: Vec<WrapToken>) -> Vec<(bool, Vec<TextChunk>)> {
             .last()
             .and_then(|(_, group)| group.last())
             .is_some_and(|chunk| chunk.text.chars().any(is_unspaced));
-        let break_here = token.space_before || starts_with_cjk || prev_ends_with_cjk;
+        let joined = token.text.starts_with(['\u{a0}', '\u{202f}'])
+            || groups
+                .last()
+                .and_then(|(_, group)| group.last())
+                .is_some_and(|chunk| chunk.text.ends_with(['\u{a0}', '\u{202f}']));
+        let break_here = !joined && (token.space_before || starts_with_cjk || prev_ends_with_cjk);
         let space_before = token.space_before;
         let chunk = TextChunk {
             text: token.text,
@@ -2148,7 +2203,8 @@ mod tests {
     use crate::markdown::{Block, parse_markdown};
     use crate::report::font::font_arc;
     use crate::vocabulary::{
-        Importance, LanguageCode, NonEmptyText, VocabularyEntry, VocabularySource, VocabularyTarget,
+        ContextFormat, Importance, LanguageCode, NonEmptyText, VocabularyEntry, VocabularySource,
+        VocabularyTarget,
     };
     use printpdf::{Op, PdfDocument, TextItem};
     use std::sync::Arc;
@@ -2166,6 +2222,7 @@ mod tests {
             transcription: NonEmptyText::new("bank").expect("transcription must be valid"),
             importance: Importance::new(5).expect("importance must be valid"),
             source: VocabularySource {
+                context_format: crate::vocabulary::ContextFormat::Legacy,
                 sentence: NonEmptyText::new("The aircraft made a smooth bank")
                     .expect("source sentence must be valid"),
                 lang: LanguageCode::new("en").expect("source language must be valid"),
@@ -2336,7 +2393,8 @@ mod tests {
             "**Meaning.**\n- **a financial institution that safeguards deposits and lends money to people and companies [finance]**\n- the sloping ground immediately beside a river, lake, canal, or similar body of water [landform]\n- a stored reserve of blood, data, food, or other resources for future use [reserve]\n- a long row or tier of matching objects arranged closely beside one another [row]\n- to rely confidently on a person, promise, event, or expected future result [rely]\n- to tilt an aircraft sideways while turning by raising one wing above another [aviation]\nThe noun senses grew from ideas of an edge or accumulated mass; the verbs developed separately.\n\n**Where you'll hear it.** Common in finance, geography, computing, medicine, aviation, and dependent plans.\n\n**Where it's out of place.** Do not use the finance sense for a wallet, safe, or ordinary container.\n\n**Subtlety.** Bank on takes a person or outcome; bank the aircraft names deliberate sideways tilt.",
         );
         let view = ClassifierView::from(&parsed);
-        let layout = explanation_layout(&blocks, 95.0, EXPLAIN_SIZE_MIN, view);
+        let layout =
+            explanation_layout(&blocks, ContextFormat::Legacy, 95.0, EXPLAIN_SIZE_MIN, view);
         let expected = blocks
             .iter()
             .flat_map(|block| match block {
@@ -2361,6 +2419,57 @@ mod tests {
             (actual, spaced_bullet_rows),
             (expected, 1),
             "the six-sense plan omitted content or spaced adjacent bullets"
+        );
+    }
+
+    #[test]
+    fn review_f8_pdf_tokens_cannot_separate_french_quotes() {
+        let groups = group_tokens(super::tokenize_for(
+            &[plain_chunk("avant «\u{a0}duck\u{a0}» après")],
+            ContextFormat::ExplanationV1,
+        ));
+        let text = groups
+            .into_iter()
+            .map(|(_, chunks)| {
+                chunks
+                    .into_iter()
+                    .map(|chunk| chunk.text)
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            text,
+            ["avant", "«\u{a0}duck\u{a0}»", "après"],
+            "PDF wrapping separated French quotation marks from their word"
+        );
+    }
+
+    #[test]
+    fn review_f8_narrow_pdf_rows_cannot_orphan_french_quotes() {
+        let fonts = CardSheet::new().prepare_fonts().unwrap();
+        let view = ClassifierView::from(&fonts);
+        let width = view.measure("«\u{a0}duck\u{a0}»", false, EXPLAIN_SIZE_MIN) + 0.1;
+        let layout = explanation_layout(
+            &parse_markdown("avant «\u{a0}duck\u{a0}» après"),
+            ContextFormat::ExplanationV1,
+            width,
+            EXPLAIN_SIZE_MIN,
+            view,
+        );
+        let rows = layout
+            .rows
+            .into_iter()
+            .map(|row| {
+                row.chunks
+                    .into_iter()
+                    .map(|chunk| chunk.text)
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rows,
+            ["avant", "«\u{a0}duck\u{a0}»", "après"],
+            "the measured PDF rows orphaned a French quotation mark"
         );
     }
 

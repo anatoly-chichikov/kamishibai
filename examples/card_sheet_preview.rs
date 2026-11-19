@@ -35,6 +35,10 @@ struct MetaRecord {
     source_highlight: String,
     source_hint: String,
     source_context: String,
+    #[serde(default)]
+    context_format: kamishibai::vocabulary::ContextFormat,
+    #[serde(default)]
+    explanation: Option<kamishibai::explanation::Record>,
     target_sentence: String,
     target_lang: String,
 }
@@ -49,6 +53,10 @@ impl MetaRecord {
             transcription: NonEmptyText::new(self.transcription)?,
             importance: Importance::new(self.importance)?,
             source: VocabularySource {
+                context_format: self
+                    .explanation
+                    .as_ref()
+                    .map_or(self.context_format, kamishibai::explanation::Record::format),
                 sentence: NonEmptyText::new(self.source_sentence)?,
                 lang: LanguageCode::new(self.source_lang)?,
                 highlight: NonEmptyText::new(self.source_highlight)?,

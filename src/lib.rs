@@ -6,6 +6,7 @@ pub mod anki;
 pub mod application;
 pub mod cli;
 pub mod config;
+pub mod explanation;
 pub mod gemini;
 pub mod generation;
 pub mod languages;

@@ -101,6 +101,7 @@ impl ModelProvider for Studio {
                     GenerationStage::Phonetics => {
                         serde_json::json!({"pronunciation":"mɛw", "transcription":"kɔn mɛw ŋu"})
                     }
+                    GenerationStage::Explanation => super::explanation::cat_response(),
                     GenerationStage::Features => super::gemini::scene_features(),
                     GenerationStage::Scene => super::gemini::dynamic_scene(),
                     GenerationStage::Text => {

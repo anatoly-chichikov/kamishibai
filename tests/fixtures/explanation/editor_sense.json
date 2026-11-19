@@ -1,0 +1,167 @@
+{
+  "job": {
+    "id": "ru-14",
+    "known": "ru",
+    "learning": "en",
+    "card": {
+      "term": "sharp",
+      "translation": "острый; резкий; проницательный; ровно (о времени)",
+      "sentence": "She's got a sharp mind — nothing gets past her.",
+      "highlight": "острый"
+    },
+    "sentence_known": "У неё острый ум — от неё ничего не ускользает."
+  },
+  "attempts": [
+    {
+      "limits": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": ""
+      },
+      "literal": "",
+      "meanings": [
+        {
+          "from": "острый",
+          "head": "острый ум",
+          "note": "взгляд, критик, собеседник"
+        },
+        {
+          "from": "острый",
+          "head": "острый",
+          "note": "нож, угол, игла"
+        },
+        {
+          "from": "резкий",
+          "head": "резкий",
+          "note": "звук, поворот, боль"
+        },
+        {
+          "from": "проницательный",
+          "head": "проницательный",
+          "note": "наблюдатель, судья"
+        },
+        {
+          "from": "ровно (о времени)",
+          "head": "ровно",
+          "note": "в пять часов, в полдень"
+        }
+      ],
+      "nuance": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "",
+        "why": ""
+      },
+      "where": {
+        "example": {
+          "text": "He has a sharp tongue when he's angry.",
+          "translation": "В гневе он очень язвителен."
+        },
+        "text": "В отзывах, на работе и в разговоре о сообразительных людях: ⟦sharp mind⟧, ⟦sharp observer⟧."
+      }
+    },
+    {
+      "limits": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": ""
+      },
+      "literal": "",
+      "meanings": [
+        {
+          "from": "проницательный",
+          "head": "проницательный",
+          "note": "ум, взгляд, собеседник"
+        },
+        {
+          "from": "острый",
+          "head": "острый",
+          "note": "нож, угол, игла"
+        },
+        {
+          "from": "резкий",
+          "head": "резкий",
+          "note": "звук, поворот, боль"
+        },
+        {
+          "from": "ровно (о времени)",
+          "head": "ровно",
+          "note": "в пять часов, в полдень"
+        }
+      ],
+      "nuance": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "",
+        "why": ""
+      },
+      "where": {
+        "example": {
+          "text": "He has a sharp mind for business.",
+          "translation": "У него отличная деловая хватка."
+        },
+        "text": "В отзывах, на работе и в разговоре о сообразительных людях: ⟦sharp mind⟧, ⟦sharp observer⟧."
+      }
+    },
+    {
+      "limits": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": ""
+      },
+      "literal": "",
+      "meanings": [
+        {
+          "from": "острый",
+          "head": "острый",
+          "note": "ум, взгляд, язык"
+        },
+        {
+          "from": "острый",
+          "head": "острый предмет",
+          "note": "нож, угол, игла"
+        },
+        {
+          "from": "резкий",
+          "head": "резкий",
+          "note": "звук, поворот, боль"
+        },
+        {
+          "from": "проницательный",
+          "head": "проницательный",
+          "note": "наблюдатель, критик"
+        },
+        {
+          "from": "ровно (о времени)",
+          "head": "ровно",
+          "note": "в пять часов, в полдень"
+        }
+      ],
+      "nuance": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "",
+        "why": ""
+      },
+      "where": {
+        "example": {
+          "text": "He has a sharp tongue when he's angry.",
+          "translation": "В гневе он очень язвителен."
+        },
+        "text": "В отзывах, на работе и в разговоре о сообразительных людях: ⟦sharp mind⟧, ⟦sharp observer⟧."
+      }
+    }
+  ]
+}

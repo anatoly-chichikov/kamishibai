@@ -20,6 +20,7 @@ mod done;
 mod embedded_workflow;
 #[path = "common/example.rs"]
 mod example;
+mod explanation;
 mod failure_recovery;
 mod gemini;
 mod gemini_look;

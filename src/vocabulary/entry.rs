@@ -33,6 +33,28 @@ pub struct VocabularySource {
     pub highlight: NonEmptyText,
     pub hint: NonEmptyText,
     pub context: NonEmptyText,
+    /// Explicit explanation format; absent on every legacy cards JSON document.
+    #[serde(default, skip_serializing_if = "ContextFormat::is_legacy")]
+    pub context_format: ContextFormat,
+}
+
+/// Persisted rendering contract, independent of the explanation's wording.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextFormat {
+    /// Preserve the original Markdown rendering and note identity.
+    #[default]
+    Legacy,
+    /// Render an explicitly accepted explanation with ordered meaning contrast.
+    ExplanationV1,
+}
+
+impl ContextFormat {
+    /// Omit the discriminator when serializing an unchanged legacy record.
+    #[must_use]
+    pub fn is_legacy(&self) -> bool {
+        *self == Self::Legacy
+    }
 }
 
 /// One strict target-side sentence payload.

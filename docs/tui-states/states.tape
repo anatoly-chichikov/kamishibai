@@ -75,6 +75,28 @@ Sleep 2500ms
 Type "q"
 Sleep 500ms
 
+# cards.open — reviewed explanation with contrasted meanings and quoted phrases
+Type "./target/release/examples/tui_states --state cards.open"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/39-card-explanation.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.scroll-end — complete explanation and example at the end of the card
+Type "./target/release/examples/tui_states --state cards.scroll-end"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/40-card-explanation-end.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
 # cards.tuning — S2: editor opens below the complete artifact block
 Type "./target/release/examples/tui_states --state cards.tuning"
 Enter

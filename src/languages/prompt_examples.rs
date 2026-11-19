@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use super::explanation_examples::{ExplanationExamples, scripted};
 use super::registry::profile_codes;
 
 const DOCUMENT: &str = include_str!("../../assets/prompt_examples.json");
@@ -22,6 +23,27 @@ pub(crate) struct LanguagePromptExamples {
 }
 
 impl LanguagePromptExamples {
+    /// Supply the reader's authored explanation examples without a language fallback.
+    pub(crate) fn guidance(&self) -> &ExplanationExamples {
+        &self.card.explanation
+    }
+
+    /// Supply the two established bad/good writing pairs for editor instructions.
+    pub(crate) fn rewrites(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.card
+            .writing
+            .iter()
+            .map(|pair| (pair.bad.as_str(), pair.good.as_str()))
+    }
+    /// Supply the complete reader-specific explanation conventions.
+    pub(crate) fn explanation(&self) -> ContextExamples {
+        self.card.context.clone()
+    }
+
+    /// Apply word-based checks only to languages whose writing separates words.
+    pub(crate) fn worded(&self) -> bool {
+        self.spacing == TextSpacing::Words
+    }
     /// Render localized pairs demonstrating natural learner-facing wording.
     pub(crate) fn writing(&self) -> Result<String> {
         Ok(serde_json::to_string_pretty(&self.card.writing)?)
@@ -84,7 +106,7 @@ impl LanguagePromptExamples {
         Ok(serde_json::to_string(&self.recall.fragment)?)
     }
 
-    fn valid(&self) -> bool {
+    fn valid(&self, code: &str) -> bool {
         let intake = [
             &self.understanding.intake.primary,
             &self.understanding.intake.secondary,
@@ -111,6 +133,15 @@ impl LanguagePromptExamples {
         let fragment = self.recall.fragment.visible.to_uppercase()
             == self.recall.fragment.sentence_end.to_uppercase();
         tags && lengths
+            && self.card.explanation.fault(code, self.worded()).is_none()
+            && (code != "sr"
+                || self
+                    .card
+                    .context
+                    .headers
+                    .iter()
+                    .chain([&self.card.context.literally])
+                    .all(|value| scripted(value, code)))
             && structural
             && self.card.writing.iter().all(WritingExample::valid)
             && nonempty(self.understanding.markers.tags.iter())
@@ -250,6 +281,7 @@ struct CardExamples {
     hint: HintExamples,
     context: ContextExamples,
     writing: [WritingExample; 2],
+    explanation: ExplanationExamples,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -278,9 +310,13 @@ struct HintExamples {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-struct ContextExamples {
-    headers: [String; 4],
+pub(crate) struct ContextExamples {
+    pub(crate) headers: [String; 4],
     rarity: String,
+    pub(crate) quotes: [String; 2],
+    pub(crate) literally: String,
+    #[serde(default)]
+    pub(crate) judge: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -340,9 +376,7 @@ fn catalog() -> &'static BTreeMap<String, LanguagePromptExamples> {
             codes, expected,
             "invariant: prompt examples must exactly cover supported languages"
         );
-        if let Some((code, _examples)) = values.iter().find(|(_code, examples)| !examples.valid()) {
-            panic!("invariant: prompt examples for '{code}' violate their typed language policy");
-        }
+        validate(&values).expect("invariant: prompt examples must satisfy every language policy");
         values
     })
 }
@@ -356,18 +390,117 @@ fn nonempty<'a>(mut values: impl Iterator<Item = &'a String>) -> bool {
     seen && filled
 }
 
+fn validate(values: &BTreeMap<String, LanguagePromptExamples>) -> Result<()> {
+    let mut phrases = BTreeMap::new();
+    for (code, examples) in values {
+        if let Some(field) = examples.card.explanation.fault(code, examples.worded()) {
+            anyhow::bail!("prompt examples for '{code}' violate card.explanation.{field}");
+        }
+        anyhow::ensure!(
+            examples.valid(code),
+            "prompt examples for '{code}' violate their typed language policy"
+        );
+        for (field, phrase) in examples.card.explanation.phrases() {
+            if let Some(previous) = phrases.insert(phrase, code)
+                && previous != code
+            {
+                anyhow::bail!(
+                    "prompt examples for '{code}' repeat '{previous}' in card.explanation.{field}"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Resolve the writing systems declared for explanation quotation.
+pub(crate) fn explanation_scripts(code: &str) -> Vec<unicode_script::Script> {
+    use unicode_script::Script;
+    match code.to_ascii_lowercase().as_str() {
+        "ru" | "uk" => vec![Script::Cyrillic],
+        "sr" => vec![Script::Latin],
+        "el" => vec![Script::Greek],
+        "ar" | "fa" => vec![Script::Arabic],
+        "he" => vec![Script::Hebrew],
+        "hi" => vec![Script::Devanagari],
+        "th" => vec![Script::Thai],
+        "ka" => vec![Script::Georgian],
+        "hy" => vec![Script::Armenian],
+        "zh" => vec![Script::Han],
+        "ja" => vec![Script::Han, Script::Hiragana, Script::Katakana],
+        "ko" => vec![Script::Hangul, Script::Han],
+        _ => vec![Script::Latin],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{TextSpacing, examples};
     use crate::languages::catalog;
 
+    fn seeds() -> std::collections::BTreeMap<String, super::LanguagePromptExamples> {
+        serde_json::from_str::<std::collections::BTreeMap<String, super::LanguagePromptExamples>>(
+            super::DOCUMENT,
+        )
+        .unwrap()
+        .into_iter()
+        .filter(|(code, _)| ["ru", "en"].contains(&code.as_str()))
+        .collect()
+    }
+
+    #[test]
+    fn seed_catalog_cannot_repeat_another_languages_phrases() {
+        let mut values = seeds();
+        let phrase = values["en"].card.explanation.meaning.openers[0].clone();
+        let mut other = values["en"].clone();
+        other.card.explanation.meaning.openers[1] = phrase;
+        values.insert("de".into(), other);
+        assert!(
+            super::validate(&values).is_err(),
+            "a phrase was reused across reader languages"
+        );
+    }
+
+    #[test]
+    fn seed_catalog_cannot_reject_independent_checked_blocks() {
+        assert!(
+            super::validate(&seeds()).is_ok(),
+            "the checked ru/en seed catalog was rejected"
+        );
+    }
+
+    #[test]
+    fn serbian_conventions_cannot_use_cyrillic() {
+        let mut value: super::LanguagePromptExamples = serde_json::from_str::<
+            std::collections::BTreeMap<String, super::LanguagePromptExamples>,
+        >(super::DOCUMENT)
+        .unwrap()["sr"]
+            .clone();
+        value.card.explanation = seeds()["en"].card.explanation.clone();
+        let accepted = ["literally", "header"]
+            .into_iter()
+            .filter(|field| {
+                let mut sample = value.clone();
+                if *field == "literally" {
+                    sample.card.context.literally = "дословно".into();
+                } else {
+                    sample.card.context.headers[0] = "Значение".into();
+                }
+                sample.valid("sr")
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            accepted.is_empty(),
+            "Serbian Latin conventions accepted Cyrillic: {accepted:?}"
+        );
+    }
+
     #[test]
     fn eight_added_languages_resolve_with_complete_local_examples() {
         let codes = ["SR", "KA", "HY", "FA", "SV", "RO", "HU", "FI"];
         assert!(
-            codes
-                .into_iter()
-                .all(|code| catalog().resolve(code).is_ok() && examples(code).valid()),
+            codes.into_iter().all(|code| catalog().resolve(code).is_ok()
+                && examples(code).valid(&code.to_ascii_lowercase())),
             "an added language cannot resolve with complete localized examples"
         );
     }
@@ -653,7 +786,7 @@ mod tests {
         let mut sample = examples("ru");
         sample.card.writing[0].bad = String::from(" \t");
         assert!(
-            !sample.valid(),
+            !sample.valid("ru"),
             "a writing example accepted an empty bad side"
         );
     }
@@ -663,7 +796,7 @@ mod tests {
         let mut sample = examples("ja");
         sample.card.writing[1].good = String::from(" \t");
         assert!(
-            !sample.valid(),
+            !sample.valid("ja"),
             "a writing example accepted an empty good side"
         );
     }
@@ -673,7 +806,7 @@ mod tests {
         let mut sample = examples("en");
         sample.card.writing[0].bad = format!(" {} ", sample.card.writing[0].good);
         assert!(
-            !sample.valid(),
+            !sample.valid("en"),
             "a writing example treated whitespace as a wording improvement"
         );
     }
@@ -688,7 +821,7 @@ mod tests {
         sample.understanding.intake.hinted.understanding =
             String::from("<значение из подсказки пользователя>");
         assert!(
-            sample.valid(),
+            sample.valid("ru"),
             "plain intake examples still require grammar labels before their meanings"
         );
     }
