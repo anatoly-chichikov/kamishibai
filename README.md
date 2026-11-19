@@ -80,7 +80,10 @@ up to one repair. Card writing, spelling repair, pronunciation, explanation
 and translation share a limit of six text requests per metadata attempt and
 24 over four attempts per card. Cards with multiple reviewed meanings get an
 independent sentence translation when the explanation passes and budget
-remains. An unchecked or copied bilingual example is omitted. A rejected
+remains. Each generated Anki front is checked in the reader's language. If
+the author's sentence fails, an independent translation can recover the card
+within the same budget. A missing translation drops only its optional example.
+The [console contract](llms.txt) specifies the reader-field rule. A rejected
 explanation keeps the original metadata text. Existing cached cards and Anki note identities
 stay intact, including imported JSON without an explicit explanation format.
 

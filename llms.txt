@@ -1,5 +1,5 @@
 kamishibai agent contract
-Release: 1.19.2
+Release: 1.19.3
 
 Overview
 
@@ -28,7 +28,7 @@ kamishibai agent-contract
 
 It prints the contract embedded in the installed binary. Its `Release` always
 matches that binary's application version. The release-pinned remote copy is
-`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.19.2/llms.txt`;
+`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.19.3/llms.txt`;
 never use mutable `main/llms.txt` as the installed binary's contract.
 
 Language terminology is fixed:
@@ -271,11 +271,32 @@ For a fresh card with multiple reviewed senses and an accepted explanation,
 any remaining requests can independently translate the main sentence and
 optional examples. This applies in every language, regardless of word spacing.
 Translation uses MEDIUM thinking and an 8192-token ceiling. Truncation can
-trigger one retry at 16384 tokens if a request remains. A copied learning
-sentence or a sentence outside the reader's scripts cannot replace the main
-translation. The original must then pass the same checks and contain its
-highlight. Optional examples with unchecked translations or bilingual pairs
-copied from the metadata draft are omitted.
+trigger one retry at 16384 tokens if a request remains.
+
+The generated Anki front must read as a sentence in the reader's language
+and contain its exact translated highlight. Both the author and the independent
+translator pass the same offline check. It compares NFKC-normalized,
+case-folded forms and rejects copies, near copies and untranslated study
+expressions, including inflections. Matching names and designations can
+appear on both sides. A word of the study expression cannot qualify as a
+name. An exact homograph is allowed when the card's selected meaning or
+metadata translation confirms that entire form (Spanish/Portuguese “gato”,
+Japanese/Chinese “猫”). Approval applies only to that spelling. The remaining
+sentence must still read in the reader's language and pass the copy check.
+Both sides must retain words after shared names and approved identical forms
+are set aside. Sharing more than half of the shorter side's remaining words
+counts as a near copy. The check counts repeated words and uses grapheme
+clusters for text in Chinese, Japanese and Thai scripts. Offline classifiers
+check the remaining language. A single remaining word is scored on its own.
+In a close language call, vocabulary distinctive to the reader can confirm a
+short sentence. For up to three remaining words, a card meaning that accounts
+for every word can also confirm the language when no study homograph has
+been set aside.
+The front and its exact highlight keep their original spelling.
+If the author's sentence fails, creation and revision request an independent
+translation within the same budget. If neither version passes, the card's
+metadata cannot be saved. A missing or unchecked optional example translation
+omits that example. Bilingual pairs copied from the metadata draft are omitted.
 More than five reviewed senses, or nonempty semicolon-separated translation
 groups when no reviewed senses exist, retain the Metadata text before any
 explanation request. The complete reviewed inventory remains available; the
@@ -290,7 +311,7 @@ does not certify pronunciation as dictionary-verified.
 With default batch settings and a single reviewed sense, the metadata author
 receives the original prompt. Multiple reviewed senses add sentence-translation
 guidance and any examples available for that exact language pair.
-Release 1.19.2 retains the metadata cache
+Release 1.19.3 retains the metadata cache
 policy, session format, card keys, Anki note type and templates. Existing
 current-policy cached cards are reused without buying an explanation. New
 meta.json records retain the explanation parts, assignment stamp and Metadata

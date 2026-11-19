@@ -2839,6 +2839,203 @@ mod tests {
     }
 
     #[test]
+    fn reader_field_cannot_publish_a_copy_paraphrase_or_inflected_answer_from_either_writer() {
+        let car = "I need to get the car fixed before the weekend.";
+        let cases = [
+            (
+                "FR",
+                car,
+                "Ｉ ｎｅｅｄ ｔｏ ｇｅｔ ｔｈｅ ｃａｒ ｆｉｘｅｄ ｂｅｆｏｒｅ ｔｈｅ ｗｅｅｋｅｎｄ.",
+                "ｇｅｔ ｔｈｅ ｃａｒ ｆｉｘｅｄ",
+            ),
+            (
+                "FR",
+                car,
+                "I must have my vehicle repaired by Friday.",
+                "have my vehicle repaired",
+            ),
+            (
+                "RU",
+                car,
+                "Мне нужно починить машину before the weekend.",
+                "починить машину",
+            ),
+            (
+                "RU",
+                "I finally got the car fixed at the garage near my office yesterday.",
+                "Я вчера наконец got the car fixed в автомастерской рядом с офисом.",
+                "got the car fixed",
+            ),
+        ];
+        let mut leaked = Vec::new();
+        for (reader, target, bad, highlight) in cases {
+            let meaning = if reader == "FR" {
+                "faire réparer la voiture"
+            } else {
+                "починить машину"
+            };
+            let draft = CardDraft::new(
+                "get the car fixed",
+                meaning,
+                LanguagePair::new("EN", reader),
+            );
+            for first in [bad, target] {
+                let mut meta = translation_case(0)["metadata"].clone();
+                meta["target_sentence"] = target.into();
+                meta["source_sentence"] = first.into();
+                meta["source_highlight"] = if first == bad { highlight } else { target }.into();
+                let other = json!({"source_sentence":bad,"source_highlight":highlight,"examples":["","",""]});
+                let transport = FakeTransport::new(vec![
+                    text_body(&meta),
+                    phonetics_body(&meta),
+                    explanation_fallback_body(),
+                    text_body(&other),
+                ]);
+                let result = GeminiClient::new("fixture", transport.clone())
+                    .generate_draft_meta(&draft, None);
+                if result.is_ok() || transport.requests.borrow().len() != 4 {
+                    leaked.push((reader, first, bad));
+                }
+            }
+        }
+        assert!(
+            leaked.is_empty(),
+            "unsafe reader fields reached card metadata or skipped recovery: {leaked:?}"
+        );
+    }
+
+    #[test]
+    fn reader_field_cannot_exempt_a_homograph_without_the_cards_own_translation() {
+        let pairs = [
+            (
+                "ES",
+                "PT",
+                "gato",
+                "felino",
+                "El gato duerme.",
+                "O gato dorme.",
+            ),
+            (
+                "PT",
+                "ES",
+                "gato",
+                "felino",
+                "O gato dorme.",
+                "El gato duerme.",
+            ),
+            ("JA", "ZH", "猫", "ねこ", "猫が寝ています。", "猫在睡觉。"),
+            ("ZH", "JA", "猫", "家猫", "猫在睡觉。", "猫が寝ています。"),
+        ];
+        let mut misses = Vec::new();
+        for (known, learning, term, alternative, front, back) in pairs {
+            for (selected, meaning, valid) in [
+                (term, alternative, true),
+                (alternative, term, true),
+                (alternative, alternative, false),
+            ] {
+                for recovery in [false, true] {
+                    let draft = CardDraft::new(term, selected, LanguagePair::new(learning, known));
+                    let mut meta = translation_case(0)["metadata"].clone();
+                    let initial = if recovery { back } else { front };
+                    meta["meaning"] = meaning.into();
+                    meta["target_sentence"] = back.into();
+                    meta["source_sentence"] = initial.into();
+                    meta["source_highlight"] = term.into();
+                    let other = json!({"source_sentence":front,"source_highlight":term,"examples":["","",""]});
+                    let transport = FakeTransport::new(vec![
+                        text_body(&meta),
+                        phonetics_body(&meta),
+                        explanation_fallback_body(),
+                        text_body(&other),
+                    ]);
+                    let result = GeminiClient::new("fixture", transport.clone())
+                        .generate_draft_meta(&draft, None);
+                    if result.as_ref().map(CardMeta::source_sentence).ok() != valid.then_some(front)
+                        || result
+                            .as_ref()
+                            .err()
+                            .is_some_and(|err| !format!("{err:#}").contains("reader-language"))
+                        || transport.requests.borrow().len()
+                            != if valid && !recovery { 3 } else { 4 }
+                    {
+                        misses.push((known, learning, selected, meaning, recovery));
+                    }
+                }
+            }
+        }
+        assert!(
+            misses.is_empty(),
+            "the front did not enforce this card's homograph approval on both routes: {misses:?}"
+        );
+    }
+
+    #[test]
+    fn reader_field_cannot_count_names_as_the_language_of_a_short_translation() {
+        let cases = [
+            ("bought", "Ford bought IBM.", "Ford купил IBM.", "купил"),
+            (
+                "broke",
+                "The iPhone broke in New York.",
+                "В New York сломался iPhone.",
+                "сломался",
+            ),
+        ];
+        let mut rejected = Vec::new();
+        for (term, target, source, highlight) in cases {
+            let draft = CardDraft::new(term, highlight, LanguagePair::new("EN", "RU"));
+            let mut meta = translation_case(0)["metadata"].clone();
+            meta["target_sentence"] = target.into();
+            meta["source_sentence"] = source.into();
+            meta["source_highlight"] = highlight.into();
+            let repeated = json!({"source_sentence": source, "source_highlight": highlight, "examples": ["", "", ""]});
+            let transport = FakeTransport::new(vec![
+                text_body(&meta),
+                phonetics_body(&meta),
+                explanation_fallback_body(),
+                text_body(&repeated),
+            ]);
+            let result =
+                GeminiClient::new("fixture", transport.clone()).generate_draft_meta(&draft, None);
+            if result.as_ref().map(CardMeta::source_sentence).ok() != Some(source)
+                || transport.requests.borrow().len() != 3
+            {
+                rejected.push(source);
+            }
+        }
+        assert!(
+            rejected.is_empty(),
+            "matching names discarded a short reader sentence: {rejected:?}"
+        );
+    }
+
+    #[test]
+    fn reader_field_cannot_lose_the_card_or_sibling_example_for_one_missing_translation() {
+        let mut case = translation_case(1);
+        let draft = reviewed_draft(&case, "EN");
+        let sibling = json!({"text":"The guards caught only small fry.", "translation":"Охранники поймали только мелких сошек."});
+        case["parts"]["where"]["example"] = sibling.clone();
+        let mut translation = case["translations"].clone();
+        translation["examples"] = json!([sibling["translation"], "", "  "]);
+        let (meta, calls) = translate_case(&case, &draft, &translation);
+        let parts = serde_json::to_value(&meta).unwrap()["explanation"]["parts"].clone();
+        assert_eq!(
+            (
+                json!(meta.source_sentence()),
+                &parts["nuance"]["example"],
+                &parts["where"]["example"],
+                calls
+            ),
+            (
+                translation["source_sentence"].clone(),
+                &json!({"text":"","translation":""}),
+                &sibling,
+                5
+            ),
+            "one empty optional translation discarded the main sentence or an independently translated sibling"
+        );
+    }
+
+    #[test]
     fn reader_sentences_keep_matching_names_and_cannot_keep_the_learning_sentence() {
         let cases = [
             (
@@ -3469,10 +3666,12 @@ mod tests {
         let case = &cases[0];
         let meta = &case["metadata"];
         let parts = &case["parts"];
-        let outcomes = ["highlight", "example"].map(|defect| {
+        let outcomes = ["highlight", "extra-example", "missing-example"].map(|defect| {
             let mut bad = case["translations"].clone();
             if defect == "highlight" {
                 bad["source_highlight"] = json!("несуществующий фрагмент");
+            } else if defect == "extra-example" {
+                bad["examples"][0] = json!("В этой секции нет учебного примера");
             } else {
                 bad["examples"][2] = json!("");
             }
@@ -3508,7 +3707,7 @@ mod tests {
         });
         assert_eq!(
             outcomes,
-            [(true, 5); 2],
+            [(true, 5), (true, 5), (false, 5)],
             "an invalid translation shipped partial metadata or disappeared from accounting"
         );
     }
@@ -4591,7 +4790,7 @@ mod tests {
     }
 
     #[test]
-    fn card_paths_cannot_reject_an_article_already_visible_in_the_known_sentence() {
+    fn card_paths_cannot_reject_the_hint_or_publish_an_unapproved_single_letter_homograph() {
         let labels = sentence_labels_response("neutral", "a1", "statement", Vec::new());
         let mut metadata = card_meta_response(labels.clone());
         let mut correction = card_correction_response(labels);
@@ -4602,21 +4801,28 @@ mod tests {
             response["target_sentence"] = json!("Il a un chat noir.");
         }
         correction["term"] = json!("a");
+        let front = "He has one black cat.";
+        let translation =
+            json!({"source_sentence": front,"source_highlight":"has","examples":["","",""]});
         let client = GeminiClient::new(
             "key",
             FakeTransport::new(vec![
                 text_body(&metadata),
                 phonetics_body(&metadata),
                 explanation_fallback_body(),
+                text_body(&translation),
                 text_body(&metadata),
                 phonetics_body(&metadata),
                 explanation_fallback_body(),
+                text_body(&translation),
                 text_body(&correction),
                 phonetics_body(&correction),
                 explanation_fallback_body(),
+                text_body(&translation),
                 text_body(&correction),
                 phonetics_body(&correction),
                 explanation_fallback_body(),
+                text_body(&translation),
             ]),
         );
         let pair = LanguagePair::new("fr", "en");
@@ -4635,13 +4841,22 @@ mod tests {
             });
         assert_eq!(
             (
-                metered.is_ok(),
-                observed.is_ok(),
-                corrected.is_ok(),
-                corrected_observed.is_ok(),
+                metered
+                    .as_ref()
+                    .ok()
+                    .map(|(meta, _)| meta.source_sentence()),
+                observed.as_ref().ok().map(CardMeta::source_sentence),
+                corrected
+                    .as_ref()
+                    .ok()
+                    .map(|(revision, _)| revision.meta().source_sentence()),
+                corrected_observed
+                    .as_ref()
+                    .ok()
+                    .map(|revision| revision.meta().source_sentence()),
                 costs.len()
             ),
-            (true, true, true, true, 6),
+            (Some(front), Some(front), Some(front), Some(front), 8),
             "an ordinary article already visible on the known-language face caused a false hint rejection"
         );
     }

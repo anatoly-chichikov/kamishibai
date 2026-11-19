@@ -19,6 +19,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 
 [[package]]
+name = "ablaut"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90fbd3b5f61d10d580f8fb2cfe635a31564c83983e5d775a894fd568e9e5232c"
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -567,6 +573,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "caseless"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b6fd507454086c8edfd769ca6ada439193cdb209c7681712ef6275cccbfe5d8"
+dependencies = [
+ "unicode-normalization",
+]
+
+[[package]]
 name = "castaway"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -642,6 +657,15 @@ checksum = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
 dependencies = [
  "crypto-common 0.1.7",
  "inout",
+]
+
+[[package]]
+name = "cjclassifier"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b65dbae75fe61aa5664cf1deb391fa77ed2a1fd6af4fea57c3559097106a8b0"
+dependencies = [
+ "flate2",
 ]
 
 [[package]]
@@ -2071,12 +2095,14 @@ dependencies = [
 
 [[package]]
 name = "kamishibai"
-version = "1.19.2"
+version = "1.19.3"
 dependencies = [
+ "ablaut",
  "allsorts",
  "anyhow",
  "assert_cmd",
  "assert_fs",
+ "caseless",
  "clap",
  "console",
  "crossterm",
@@ -2085,6 +2111,8 @@ dependencies = [
  "fancy-regex",
  "image",
  "insta",
+ "langid-rs",
+ "langidentify",
  "lopdf",
  "md5",
  "ocr-rs",
@@ -2104,12 +2132,14 @@ dependencies = [
  "sha2 0.11.0",
  "shlex",
  "signal-hook",
+ "snowball_stemmers_rs",
  "tempfile",
  "termwiz",
  "thiserror 2.0.18",
  "time",
  "unicode-bidi",
  "unicode-bidi-mirroring",
+ "unicode-normalization",
  "unicode-script",
  "unicode-segmentation",
  "unicode-width",
@@ -2132,6 +2162,46 @@ name = "lab"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf36173d4167ed999940f804952e6b08197cae5ad5d572eb4db150ce8ad5d58f"
+
+[[package]]
+name = "langid-rs"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13737fdd7a7043346109f6481c4ffe0c85a26eb786b9228a46ee3ef202241322"
+
+[[package]]
+name = "langidentify"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4037fde0a62ff8311a765bef38cf859ad85fcd5bcc3657b99cb08cc735ac98e1"
+dependencies = [
+ "cjclassifier",
+ "flate2",
+ "langidentify-models-lite",
+ "log",
+]
+
+[[package]]
+name = "langidentify-models-lite"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a772c217d7e6a299cf91fc79f707cdb5c676e0099aca2797a73a676a4266c2ef"
+dependencies = [
+ "langidentify-models-lite-a",
+ "langidentify-models-lite-b",
+]
+
+[[package]]
+name = "langidentify-models-lite-a"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e86f815105e9cb5636db95828c8460b7055fa6452940bc1de132cb3d24dfaeef"
+
+[[package]]
+name = "langidentify-models-lite-b"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f0f40f963126f5e66a6da9cc0ed4b7708178695c4d343b614dda0a7e6b6a34b"
 
 [[package]]
 name = "lazy_static"
@@ -4010,6 +4080,16 @@ name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
+
+[[package]]
+name = "snowball_stemmers_rs"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba89fc66bf477e9bc2b98fa1a8ccac73fed054bc8de6cc7b3dbfab5f56e8b3ad"
+dependencies = [
+ "serde",
+ "serde_derive",
+]
 
 [[package]]
 name = "socket2"

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.19.3
+
+- Check generated Anki fronts against the reader's language, including translations with shared names and learning expressions used in an inflected form.
+- Accept an identical study form when its full spelling is the card’s approved reader translation.
+- Keep the main translation and the other examples when one optional translation is empty.
+
 ## 1.19.2
 
 - Enforce six text requests per metadata attempt and 24 over four attempts, including spelling repairs, explanation edits and independent translations.

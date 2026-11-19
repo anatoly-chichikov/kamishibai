@@ -10,7 +10,8 @@ use super::{
     response_text,
 };
 use crate::explanation::{
-    Card, Input, Language, Operation, Parts, Record, Sense, Task, Writer, compose, judge, write,
+    Card, Input, Language, Operation, Parts, ReaderField, Record, Sense, Task, Writer, compose,
+    judge, write,
 };
 use crate::models::{GenerationStage, ModelOutput};
 use crate::session::{CardDraft, CardMeta, CostRecord};
@@ -84,7 +85,8 @@ impl<T: Transport> GeminiClient<T> {
         let translate_examples = matches!(operation, Operation::Create)
             && draft.reviewed_senses().len() > 1
             && parts.is_some();
-        let recover_sentence = meta.validate_source_translation(&language, draft).is_err();
+        let field = ReaderField::from_codes(draft.pair().known(), draft.pair().learning())?;
+        let recover_sentence = meta.validate_source_translation(&field, draft).is_err();
         let translation = if translate_examples || recover_sentence {
             self.translate(draft, &meta, parts.as_ref(), attempt, !recover_sentence)
         } else {
@@ -101,7 +103,7 @@ impl<T: Transport> GeminiClient<T> {
                 Some(translation.examples),
             )
         });
-        let meta = meta.with_source_translation(source, &language, draft)?;
+        let meta = meta.with_source_translation(source, &field, draft)?;
         let parts = match parts {
             Some(parts) if translate_examples => {
                 let mut parts = parts.with_translations(examples, &language)?;

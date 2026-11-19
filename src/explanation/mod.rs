@@ -11,6 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 pub use layout::{compose, quote, tidy};
 pub use review::{Verdict, judge};
+pub(crate) use sentence::ReaderField;
 pub(crate) use writing::sentence_translations;
 pub use writing::{Input, Operation, Task, Writer, write};
 
@@ -129,7 +130,7 @@ impl Parts {
         for (example, translated) in self.examples_mut().into_iter().zip(translations) {
             let translated = translated.trim();
             anyhow::ensure!(
-                example.text.is_empty() == translated.is_empty(),
+                !example.text.is_empty() || translated.is_empty(),
                 "Translated examples must match the populated sections"
             );
             if language.translates(&example.text, translated) {

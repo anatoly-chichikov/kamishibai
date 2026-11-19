@@ -641,36 +641,36 @@ impl CardMeta {
     pub(crate) fn with_source_translation(
         mut self,
         translation: Option<(String, String)>,
-        language: &crate::explanation::Language,
+        field: &crate::explanation::ReaderField,
         draft: &CardDraft,
     ) -> Result<Self> {
         if let Some((sentence, highlight)) = translation.filter(|(sentence, _)| {
-            language.translates_sentence(
+            field.translates_sentence(
                 &self.target_sentence,
                 sentence,
                 draft.term(),
-                draft.understanding(),
+                &[draft.understanding(), self.meaning()],
             )
         }) {
             self.source_sentence = sentence;
             self.source_highlight = highlight;
         }
-        self.validate_source_translation(language, draft)?;
+        self.validate_source_translation(field, draft)?;
         Ok(self)
     }
 
     /// Check that the Anki front shows a reader sentence with an exact highlight.
     pub(crate) fn validate_source_translation(
         &self,
-        language: &crate::explanation::Language,
+        field: &crate::explanation::ReaderField,
         draft: &CardDraft,
     ) -> Result<()> {
         anyhow::ensure!(
-            language.translates_sentence(
+            field.translates_sentence(
                 &self.target_sentence,
                 &self.source_sentence,
                 draft.term(),
-                draft.understanding()
+                &[draft.understanding(), self.meaning()]
             ),
             "The card has no usable reader-language sentence translation"
         );
