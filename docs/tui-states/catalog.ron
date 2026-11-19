@@ -1544,8 +1544,14 @@ Catalog(
                         Action(
                             event: "cleanup completes",
                             target: "export.cancelling",
-                            condition: "the worker has stopped",
-                            expectation: "Return to the terminal after removing the unfinished file; this terminal action has no next UI state",
+                            condition: "the worker stopped before publishing",
+                            expectation: "Remove the unfinished file and report cancellation in the restored terminal",
+                        ),
+                        Action(
+                            event: "publication wins the race with cancellation",
+                            target: "export.cancelling",
+                            condition: "the worker has already published the verified file",
+                            expectation: "Print the saved path in the restored terminal and exit",
                         ),
                     ],
                 ),
@@ -1558,6 +1564,8 @@ Catalog(
                     tests: [
                         Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
                         Check(file: "src/cli/export/screen.rs", test: "cancelling_an_active_save_waits_for_temporary_file_cleanup"),
+                        Check(file: "tests/anki_history.rs", test: "cancelling_a_save_cannot_hide_cleanup_or_its_outcome"),
+                        Check(file: "tests/anki_history.rs", test: "a_late_control_c_cannot_hide_the_published_archive"),
                     ],
                 ),
                 evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
@@ -5607,9 +5615,12 @@ Catalog(
                 route: ["export.summary", "export.saving", "export.cancelling"],
                 expectations: [
                     "Cancellation drains publication before returning to the terminal",
+                    "The restored terminal reports cancellation or the path the worker already published",
                 ],
                 tests: [
                     Check(file: "src/cli/export/screen.rs", test: "cancelling_an_active_save_waits_for_temporary_file_cleanup"),
+                    Check(file: "tests/anki_history.rs", test: "cancelling_a_save_cannot_hide_cleanup_or_its_outcome"),
+                    Check(file: "tests/anki_history.rs", test: "a_late_control_c_cannot_hide_the_published_archive"),
                 ],
             ),
             Scenario(head: Head(id: "export.close-anki", intent: "Anki ownership refusal returns through another ownership check before any profile or deck is read"),
