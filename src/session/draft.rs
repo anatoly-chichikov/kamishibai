@@ -644,10 +644,11 @@ impl CardMeta {
         field: &crate::explanation::ReaderField,
         draft: &CardDraft,
     ) -> Result<Self> {
-        if let Some((sentence, highlight)) = translation.filter(|(sentence, _)| {
+        if let Some((sentence, highlight)) = translation.filter(|(sentence, highlight)| {
             field.translates_sentence(
                 &self.target_sentence,
                 sentence,
+                highlight,
                 draft.term(),
                 &[draft.understanding(), self.meaning()],
             )
@@ -669,6 +670,7 @@ impl CardMeta {
             field.translates_sentence(
                 &self.target_sentence,
                 &self.source_sentence,
+                &self.source_highlight,
                 draft.term(),
                 &[draft.understanding(), self.meaning()]
             ),

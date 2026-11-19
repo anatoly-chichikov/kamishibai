@@ -278,16 +278,25 @@ and contain its exact translated highlight. Both the author and the independent
 translator pass the same offline check. It compares NFKC-normalized,
 case-folded forms and rejects copies, near copies and untranslated study
 expressions, including inflections. Matching names and designations can
-appear on both sides. A word of the study expression cannot qualify as a
-name. An exact homograph is allowed when the card's selected meaning or
-metadata translation confirms that entire form (Spanish/Portuguese “gato”,
+appear on both sides with different capitalization or punctuation (“npm” /
+“NPM”, “Ford—Tesla”). A component of the study expression or a recognized
+form such as “People” for “person” cannot qualify as a name in any case.
+If the check cannot locate the study expression on the back, a translated
+highlight made entirely of shared designations needs the card's confirmation
+of that full spelling. An exact homograph is allowed when the card's selected
+meaning or metadata translation confirms that entire form (Spanish/Portuguese “gato”,
 Japanese/Chinese “猫”). Approval applies only to that spelling. The remaining
 sentence must still read in the reader's language and pass the copy check.
 Both sides must retain words after shared names and approved identical forms
 are set aside. Sharing more than half of the shorter side's remaining words
 counts as a near copy. The check counts repeated words and uses grapheme
-clusters for text in Chinese, Japanese and Thai scripts. Offline classifiers
-check the remaining language. A single remaining word is scored on its own.
+clusters for text in Chinese, Japanese and Thai scripts. The offline language
+check targets the learning language and English whenever they differ from
+the reader's language. Other languages outside the catalog that share the
+reader's script can pass, including Marathi for Hindi, Yiddish for Hebrew
+and Danish for Swedish. Deliberate Unicode disguises beyond NFKC and case
+folding are outside the check's scope. A single remaining word is scored on
+its own.
 In a close language call, vocabulary distinctive to the reader can confirm a
 short sentence. For up to three remaining words, a card meaning that accounts
 for every word can also confirm the language when no study homograph has

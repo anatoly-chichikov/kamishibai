@@ -104,6 +104,11 @@ impl Profiles {
             .is_some_and(|weights| weights.iter().any(|(language, _)| *language == index))
     }
 
+    /// Check whether any vocabulary sharing this script records the folded word.
+    pub(super) fn lists(&self, word: &str) -> bool {
+        self.words.contains_key(word)
+    }
+
     /// Combine character n-gram and word likelihoods across this writing system.
     pub(super) fn read_text(&self, text: &str) -> Reading {
         let mut grams = Evidence::new(self.codes.len());

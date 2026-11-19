@@ -2,7 +2,9 @@
 
 ## 1.19.3
 
-- Check generated Anki fronts against the reader's language, including translations with shared names and learning expressions used in an inflected form.
+- Reject copied learning sentences and untranslated study forms on generated Anki fronts, including capitalized irregular forms such as “People” for “person”. Allow matching names across case changes and punctuation, including “npm”/“NPM” and “Ford—Tesla”.
+- Check for sentences in the learning language or English when either differs from the reader's language. Other languages outside the catalog can pass if they share the reader's script, such as Marathi for Hindi.
+- Include third-party licenses and upstream notices in each release archive, including the original Snowball BSD terms.
 - Accept an identical study form when its full spelling is the card’s approved reader translation.
 - Keep the main translation and the other examples when one optional translation is empty.
 

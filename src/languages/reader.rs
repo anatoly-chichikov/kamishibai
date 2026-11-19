@@ -4,7 +4,8 @@ mod profile;
 
 use profile::Profiles;
 use snowball_stemmers_rs::{Algorithm, Stemmer};
-use std::collections::HashSet;
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 use unicode_normalization::UnicodeNormalization;
 use unicode_script::{Script, UnicodeScript};
 use unicode_segmentation::UnicodeSegmentation;
@@ -119,6 +120,16 @@ impl<'a> ReaderVocabulary<'a> {
         attested(self.learning, study) && !attested(self.reader, reader)
     }
 }
+
+/// Recognize an uncapitalized label such as "npm" when no word profile knows its spelling.
+pub(crate) fn unlisted_label(word: &str) -> bool {
+    let Some(letter) = word.chars().find(|c| c.is_lowercase()) else {
+        return false;
+    };
+    Profiles::for_scripts(&[letter.script()])
+        .is_some_and(|profile| !profile.lists(word) && !profile.lists(&without_macrons(word)))
+}
+
 fn winner(text: &str) -> &'static str {
     byte_ngrams::rank(text)[0].0
 }
@@ -145,8 +156,82 @@ fn serbian_cyrillic(text: &str) -> String {
         .collect()
 }
 
-/// Resolve the available Snowball rules for the language of the study expression.
-pub(crate) fn stemmer(code: &str) -> Option<Stemmer> {
+/// Match study words by their Snowball stems, including paradigms that change stems.
+pub(crate) struct StudyStems {
+    snowball: Option<Stemmer>,
+    alternates: HashMap<String, &'static str>,
+}
+
+impl StudyStems {
+    /// Index alternate stems of the same paradigm in the selected study language.
+    pub(crate) fn from_code(code: &str) -> Self {
+        let snowball = stemmer(code);
+        let mut alternates = HashMap::new();
+        for group in paradigms(code) {
+            for word in *group {
+                let stem = snowball
+                    .as_ref()
+                    .map_or(Cow::Borrowed(*word), |s| s.stem(word));
+                alternates.insert(stem.into_owned(), group[0]);
+            }
+        }
+        Self {
+            snowball,
+            alternates,
+        }
+    }
+
+    /// Return the same key for any recognized member of a study-word paradigm.
+    pub(crate) fn stem<'word>(&self, word: &'word str) -> Cow<'word, str> {
+        let stem = self
+            .snowball
+            .as_ref()
+            .map_or(Cow::Borrowed(word), |s| s.stem(word));
+        self.alternates
+            .get(stem.as_ref())
+            .copied()
+            .map_or(stem, Cow::Borrowed)
+    }
+}
+
+fn paradigms(code: &str) -> &'static [&'static [&'static str]] {
+    match code {
+        "cs" => &[&[
+            "být", "jsem", "jsi", "je", "jsme", "jste", "jsou", "byl", "byla", "bylo", "byli",
+            "byly", "budu", "bude",
+        ]],
+        "de" => &[&["datum", "daten"]],
+        "en" => &[
+            &["person", "people"],
+            &["child", "children"],
+            &["man", "men"],
+            &["woman", "women"],
+            &["mouse", "mice"],
+            &["goose", "geese"],
+            &["tooth", "teeth"],
+            &["foot", "feet"],
+        ],
+        "fr" => &[&["œil", "yeux"]],
+        "it" => &[
+            &["buono", "buona", "migliore", "migliori"],
+            &["cattivo", "peggiore", "peggiori"],
+        ],
+        "nl" => &[&["zijn", "ben", "bent", "is", "was", "waren", "geweest"]],
+        "pl" => &[&[
+            "człowiek",
+            "ludzie",
+            "ludzi",
+            "ludziom",
+            "ludźmi",
+            "ludziach",
+        ]],
+        "ru" => &[&["человек", "люди", "людей", "людям", "людьми", "людях"]],
+        "tr" => &[&["gitmek", "git", "gidiyor", "gider", "gitti", "gidecek"]],
+        _ => &[],
+    }
+}
+
+fn stemmer(code: &str) -> Option<Stemmer> {
     use Algorithm as A;
     let algorithm = match code {
         "ar" => A::Arabic,

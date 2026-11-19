@@ -6,12 +6,13 @@ use std::collections::{HashMap, HashSet};
 use anyhow::Result;
 use caseless::Caseless;
 use kamishibai_reader_verbs::Language as VerbLanguage;
-use snowball_stemmers_rs::Stemmer;
 use unicode_normalization::UnicodeNormalization;
 use unicode_script::{Script, UnicodeScript};
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::languages::{ReaderVocabulary, catalog, explanation_scripts, native_scripted, stemmer};
+use crate::languages::{
+    ReaderVocabulary, StudyStems, catalog, explanation_scripts, native_scripted, unlisted_label,
+};
 
 /// The language pair used to validate either proposed version of the Anki front.
 pub(crate) struct ReaderField {
@@ -36,6 +37,7 @@ impl ReaderField {
         &self,
         learning: &str,
         reader: &str,
+        highlight: &str,
         term: &str,
         approved: &[&str],
     ) -> bool {
@@ -45,8 +47,7 @@ impl ReaderField {
         let target = tokens(&learning);
         let source = tokens(&reader);
         let study = tokens(&term);
-        let morphology = stemmer(self.learning);
-        let study = StudyExpression::new(study, morphology, self.learning);
+        let study = StudyExpression::new(study, self.learning);
         if study.words.is_empty() || source.is_empty() || target.is_empty() {
             return false;
         }
@@ -58,18 +59,28 @@ impl ReaderField {
         {
             return false;
         }
-        let Some(shared) = study.designations(&target, &source) else {
+        let Some(shared) = study.designations(&target, &source, &reader) else {
             return false;
         };
+        let highlight = fold(highlight.trim());
+        let marked = tokens(&highlight);
+        if !marked.is_empty()
+            && marked
+                .iter()
+                .all(|word| shared.contains(word.folded.as_str()))
+            && !approved.contains(&highlight)
+            && !target
+                .windows(study.words.len())
+                .any(|part| study.matches_span(part))
+        {
+            return false;
+        }
         let Some(ignored) = study.exemptions(&reader, &source, &approved, &shared, true) else {
             return false;
         };
         if study.words.len() > 1
             && source.iter().zip(&ignored).any(|(word, exempt)| {
-                !exempt
-                    && word.is_designation()
-                    && study.contains(word)
-                    && target.iter().any(|part| part.folded == word.folded)
+                !exempt && study.contains(word) && target.iter().any(|part| part.shares_label(word))
             })
         {
             return false;
@@ -103,7 +114,7 @@ impl ReaderField {
         let residual = remaining(&reader, &source, &ignored);
         let names: Vec<_> = source
             .iter()
-            .map(|word| shared.contains(word.text))
+            .map(|word| shared.contains(word.folded.as_str()))
             .collect();
         vocabulary.recognizes(&residual, &remaining(&reader, &source, &names))
             || (ignored == names
@@ -120,6 +131,11 @@ struct Word<'a> {
 }
 
 impl Word<'_> {
+    fn shares_label(&self, other: &Self) -> bool {
+        self.folded == other.folded
+            && (self.is_designation() || other.is_designation() || unlisted_label(&self.folded))
+    }
+
     fn is_designation(&self) -> bool {
         self.text
             .chars()
@@ -129,13 +145,6 @@ impl Word<'_> {
     fn infinitives(&self, language: VerbLanguage) -> &[String] {
         self.infinitives
             .get_or_init(|| language.infinitives(&self.folded))
-    }
-
-    fn stem(&self, morphology: Option<&Stemmer>) -> String {
-        morphology.map_or_else(
-            || self.folded.clone(),
-            |s| s.stem(&self.folded).into_owned(),
-        )
     }
 }
 
@@ -172,22 +181,22 @@ fn tokens(text: &str) -> Vec<Word<'_>> {
 
 struct StudyExpression<'a> {
     words: Vec<Word<'a>>,
-    morphology: Option<Stemmer>,
+    morphology: StudyStems,
     language: Option<VerbLanguage>,
 }
 
 impl<'a> StudyExpression<'a> {
-    fn new(words: Vec<Word<'a>>, morphology: Option<Stemmer>, code: &str) -> Self {
+    fn new(words: Vec<Word<'a>>, code: &str) -> Self {
         Self {
             words,
-            morphology,
+            morphology: StudyStems::from_code(code),
             language: VerbLanguage::from_code(code),
         }
     }
 
     fn matches(&self, lemma: &Word<'_>, surface: &Word<'_>) -> bool {
         if lemma.folded == surface.folded
-            || lemma.stem(self.morphology.as_ref()) == surface.stem(self.morphology.as_ref())
+            || self.morphology.stem(&lemma.folded) == self.morphology.stem(&surface.folded)
         {
             return true;
         }
@@ -210,26 +219,38 @@ impl<'a> StudyExpression<'a> {
         self.words.iter().any(|lemma| self.matches(lemma, word))
     }
 
+    fn matches_span(&self, span: &[Word<'_>]) -> bool {
+        self.words
+            .iter()
+            .zip(span)
+            .all(|(lemma, word)| self.matches(lemma, word))
+    }
+
     fn designations<'text>(
         &self,
-        target: &[Word<'text>],
+        target: &'text [Word<'_>],
         source: &[Word<'_>],
+        reader: &str,
     ) -> Option<HashSet<&'text str>> {
         let shared: HashSet<_> = target
             .iter()
             .filter_map(|word| {
-                (word.is_designation()
-                    && source.iter().any(|other| other.text == word.text)
-                    && !self.contains(word))
-                .then_some(word.text)
+                (source.iter().any(|other| word.shares_label(other)) && !self.contains(word))
+                    .then_some(word.folded.as_str())
             })
             .collect();
-        for run in source.chunk_by(|a, b| shared.contains(a.text) == shared.contains(b.text)) {
-            if shared.contains(run[0].text)
+        for run in source.chunk_by(|a, b| {
+            shared.contains(a.folded.as_str())
+                && shared.contains(b.folded.as_str())
+                && reader[a.at + a.text.len()..b.at]
+                    .chars()
+                    .all(char::is_whitespace)
+        }) {
+            if run.len() > 1
                 && !target.windows(run.len()).any(|part| {
                     part.iter()
                         .zip(run)
-                        .all(|(left, right)| left.text == right.text)
+                        .all(|(left, right)| left.folded == right.folded)
                 })
             {
                 return None;
@@ -246,18 +267,15 @@ impl<'a> StudyExpression<'a> {
         names: &HashSet<&str>,
         reader: bool,
     ) -> Option<Vec<bool>> {
-        let mut masked: Vec<_> = words.iter().map(|word| names.contains(word.text)).collect();
+        let mut masked: Vec<_> = words
+            .iter()
+            .map(|word| names.contains(word.folded.as_str()))
+            .collect();
         for (start, part) in words.windows(self.words.len()).enumerate() {
             let last = &part[part.len() - 1];
             let span = &text[part[0].at..last.at + last.text.len()];
             let confirmed = approved.contains(&fold(span));
-            if (reader || confirmed)
-                && self
-                    .words
-                    .iter()
-                    .zip(part)
-                    .all(|(lemma, word)| self.matches(lemma, word))
-            {
+            if (reader || confirmed) && self.matches_span(part) {
                 if !confirmed {
                     return None;
                 }
@@ -307,6 +325,47 @@ fn majority_shared(target: &[&str], source: &[&str]) -> bool {
 mod tests {
     use super::ReaderField;
 
+    fn misclassified_designations(verdict: &str) -> Vec<&'static str> {
+        include_str!("../../tests/fixtures/explanation/reader_designations.tsv")
+            .lines()
+            .filter(|row| {
+                let [
+                    expected,
+                    reader,
+                    learning,
+                    term,
+                    meaning,
+                    back,
+                    front,
+                    highlight,
+                ] = <[&str; 8]>::try_from(row.split('\t').collect::<Vec<_>>()).unwrap();
+                expected == verdict
+                    && ReaderField::from_codes(reader, learning)
+                        .unwrap()
+                        .translates_sentence(back, front, highlight, term, &[meaning])
+                        != (expected == "allow")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn shared_names_cannot_conceal_study_forms_or_untranslated_words() {
+        let leaked = misclassified_designations("deny");
+        assert!(
+            leaked.is_empty(),
+            "untranslated words reached the front: {leaked:?}"
+        );
+    }
+
+    #[test]
+    fn shared_names_cannot_be_lost_to_case_or_punctuation() {
+        let refused = misclassified_designations("allow");
+        assert!(
+            refused.is_empty(),
+            "legitimate names blocked the translation: {refused:?}"
+        );
+    }
+
     #[test]
     fn reader_homographs_cannot_authorize_a_second_spelling_a_copy_or_a_foreign_sentence() {
         let field = ReaderField::from_codes("pt", "es").unwrap();
@@ -338,7 +397,7 @@ mod tests {
         ]
         .into_iter()
         .filter(|(front, gloss, expected)| {
-            field.translates_sentence(target, front, "gato", &[gloss]) != *expected
+            field.translates_sentence(target, front, "gatos", "gato", &[gloss]) != *expected
         })
         .collect();
         assert!(
@@ -351,7 +410,13 @@ mod tests {
     fn approving_a_homograph_cannot_supply_the_language_of_its_surrounding_words() {
         let field = ReaderField::from_codes("pt", "es").unwrap();
         assert!(
-            !field.translates_sentence("El gato duerme.", "The gato.", "gato", &["gato", "the"]),
+            !field.translates_sentence(
+                "El gato duerme.",
+                "The gato.",
+                "gato",
+                "gato",
+                &["gato", "the"]
+            ),
             "another gloss licensed English text around the approved Portuguese homograph"
         );
     }
@@ -361,8 +426,8 @@ mod tests {
         let field = ReaderField::from_codes("uk", "en").unwrap();
         assert_eq!(
             [
-                field.translates_sentence("The cat sleeps.", "Кіт спить.", "cat", &["кіт"]),
-                field.translates_sentence("The cat sleeps.", "Кот спит.", "cat", &["кіт"]),
+                field.translates_sentence("The cat sleeps.", "Кіт спить.", "Кіт", "cat", &["кіт"]),
+                field.translates_sentence("The cat sleeps.", "Кот спит.", "Кот", "cat", &["кіт"]),
             ],
             [true, false],
             "the reader vocabulary failed to distinguish the Ukrainian and Russian short sentences"
@@ -376,6 +441,7 @@ mod tests {
             field.translates_sentence(
                 "De kat slaapt de hele middag in de zon.",
                 "Feles per totum pomeridium in sole dormit.",
+                "Feles",
                 "kat",
                 &["feles"]
             ),
@@ -390,6 +456,7 @@ mod tests {
             !field.translates_sentence(
                 "Wczoraj rano moja siostra kupiła na dworcu dwa bilety na pociąg.",
                 "Herī māne soror mea duās tesserās ferriviāriās in statiōne ēmit.",
+                "ēmit",
                 "kupić",
                 &["comprou"],
             ),
@@ -403,9 +470,9 @@ mod tests {
         let target = "De kat slaapt.";
         assert_eq!(
             [
-                field.translates_sentence(target, "Katten sover.", "kat", &["katt"]),
-                field.translates_sentence(target, "Katten sover.", "kat", &["katten"]),
-                field.translates_sentence(target, "En katt sover.", "kat", &["katt"]),
+                field.translates_sentence(target, "Katten sover.", "Katten", "kat", &["katt"]),
+                field.translates_sentence(target, "Katten sover.", "Katten", "kat", &["katten"]),
+                field.translates_sentence(target, "En katt sover.", "katt", "kat", &["katt"]),
             ],
             [false, true, true],
             "the Swedish definite article hid the Dutch plural or lost its approved spelling"
@@ -419,8 +486,8 @@ mod tests {
         let front = "Dans notre ville la STRASSE est fermée aux voitures depuis hier.";
         assert_eq!(
             [
-                field.translates_sentence(target, front, "Straße", &["Straße"]),
-                field.translates_sentence(target, front, "Straße", &["rue"])
+                field.translates_sentence(target, front, "STRASSE", "Straße", &["Straße"]),
+                field.translates_sentence(target, front, "STRASSE", "Straße", &["rue"])
             ],
             [true, false],
             "the card gloss did not control a full Unicode case-fold match"
@@ -463,7 +530,14 @@ mod tests {
                     ("inflection", embedded.as_str(), false),
                     ("other_language", third[3], false),
                 ] {
-                    if language.translates_sentence(target, text, term, &[native]) != expected {
+                    if language.translates_sentence(
+                        target,
+                        text,
+                        if expected { native } else { text },
+                        term,
+                        &[native],
+                    ) != expected
+                    {
                         misses.push(format!("{known}/{study}/{kind}"));
                     }
                 }
@@ -550,7 +624,7 @@ mod tests {
             .filter(|(known, learning, term, target, source, gloss)| {
                 ReaderField::from_codes(known, learning)
                     .unwrap()
-                    .translates_sentence(target, source, term, &[gloss])
+                    .translates_sentence(target, source, source, term, &[gloss])
             })
             .collect();
         assert!(
@@ -583,7 +657,7 @@ mod tests {
             let front = format!("The children saw the word {form} in the garden this morning.");
             ReaderField::from_codes("en", language)
                 .unwrap()
-                .translates_sentence(back, &front, term, &[meaning])
+                .translates_sentence(back, &front, form, term, &[meaning])
         })
         .collect();
         assert!(
@@ -600,6 +674,7 @@ mod tests {
             field.translates_sentence(
                 target,
                 "Ford me rappellera demain matin.",
+                "rappellera",
                 term,
                 &["contacter la société"],
             )
@@ -619,18 +694,21 @@ mod tests {
                 language.translates_sentence(
                     "The A320 landed at JFK.",
                     "В JFK приземлился A320.",
+                    "приземлился",
                     "land",
                     &["приземлиться"]
                 ),
                 language.translates_sentence(
                     "Please contact Ford today.",
                     "Свяжитесь с Ford сегодня.",
+                    "Свяжитесь с Ford",
                     "contact Ford",
                     &["связаться с компанией"]
                 ),
                 language.translates_sentence(
                     "I work at Ford.",
                     "Я работаю в Ford.",
+                    "Ford",
                     "Ford",
                     &["Ford"]
                 ),
@@ -649,11 +727,24 @@ mod tests {
                 language.translates_sentence(
                     target,
                     "Ford a racheté IBM.",
+                    "a racheté",
                     "acquire",
                     &["racheter"]
                 ),
-                language.translates_sentence(target, "Ford bought IBM.", "acquire", &["racheter"]),
-                language.translates_sentence(target, "Ford IBM.", "acquire", &["racheter"]),
+                language.translates_sentence(
+                    target,
+                    "Ford bought IBM.",
+                    "bought",
+                    "acquire",
+                    &["racheter"]
+                ),
+                language.translates_sentence(
+                    target,
+                    "Ford IBM.",
+                    "Ford IBM",
+                    "acquire",
+                    &["racheter"]
+                ),
             ],
             [true, false, false],
             "shared names outweighed the French or English predicate, or supplied the whole front"
@@ -669,18 +760,21 @@ mod tests {
                 language.translates_sentence(
                     target,
                     "Закажи ремонт в Ford перед нашим отъездом в New York.",
+                    "Закажи",
                     "order",
                     &["заказать"]
                 ),
                 language.translates_sentence(
                     target,
                     "Закажи ремонт в Volvo перед нашим отъездом.",
+                    "Закажи",
                     "order",
                     &["заказать"]
                 ),
                 language.translates_sentence(
                     target,
                     "Закажи ремонт перед нашим отъездом в York New.",
+                    "Закажи",
                     "order",
                     &["заказать"]
                 ),
@@ -688,11 +782,13 @@ mod tests {
                     target,
                     "Закажи ремонт в Ford перед нашим отъездом.",
                     "Ford",
+                    "Ford",
                     &["автоконцерн"]
                 ),
                 language.translates_sentence(
                     target,
                     "Срочно Please order the repairs at Ford before we leave.",
+                    "the repairs",
                     "New York",
                     &["город"]
                 ),
@@ -711,18 +807,21 @@ mod tests {
                 language.translates_sentence(
                     target,
                     "Il faut faire réparer la voiture avant le week-end.",
+                    "faire réparer la voiture",
                     "get the car fixed",
                     &["faire réparer la voiture"]
                 ),
                 language.translates_sentence(
                     target,
                     "Vite, we need to get the car fixed avant samedi.",
+                    "samedi",
                     "weekend",
                     &["fin de semaine"]
                 ),
                 language.translates_sentence(
                     target,
                     "Il faut get the car fixed avant la fin de la semaine.",
+                    "get the car fixed",
                     "get the car fixed",
                     &["faire réparer la voiture"]
                 ),

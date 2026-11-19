@@ -1,0 +1,29 @@
+deny	ru	en	person	человек	People were already waiting outside the station when the last train arrived.	People уже ждали у вокзала, когда прибыл последний поезд.	People
+deny	en	ru	человек	person	Люди уже ждали у вокзала, когда прибыл последний поезд.	Люди were already waiting outside the station when the last train arrived.	Люди
+deny	fr	nl	zijn	être	Was jij gisteren op het station toen de laatste trein vertrok?	Was-tu à la gare hier quand le dernier train est parti ?	Was
+deny	es	fr	œil	ojo	Yeux fermés, il a attendu que la poussière retombe.	Yeux cerrados, esperó a que se asentara el polvo.	Yeux
+deny	nl	de	Datum	datum	Daten helfen bei der Suche nach den fehlenden Unterlagen.	Daten helpen bij het zoeken naar de ontbrekende documenten.	Daten
+deny	el	tr	gitmek	φεύγω	Gitti de bir daha dönmedi.	Gitti και δεν γύρισε ποτέ ξανά.	Gitti
+deny	en	it	buono	good	Migliore di qualsiasi altro in città, questo pane finisce ogni giorno prima di mezzogiorno.	Migliore than any other bread in town, this loaf sells out before noon every day.	Migliore
+deny	uk	pl	człowiek	людина	Ludzie czekali przed dworcem, gdy przyjechał ostatni pociąg.	Ludzie чекали біля вокзалу, коли прибув останній потяг.	Ludzie
+deny	en	cs	být	be	Byl jsem v kanceláři, když zazvonil telefon.	Byl at the office when the phone rang.	Byl
+allow	ru	en	install	установить	npm failed to install the package because the server was offline.	Не удалось установить пакет через npm, потому что сервер был недоступен.	установить
+allow	ru	en	install	установить	npm failed to install the package because the server was offline.	Не удалось установить пакет через NPM, потому что сервер был недоступен.	установить
+allow	ru	en	install	установить	NPM failed to install the package because the server was offline.	Не удалось установить пакет через npm, потому что сервер был недоступен.	установить
+allow	ru	en	install	установить	NPM failed to install the package because the server was offline.	Не удалось установить пакет через NPM, потому что сервер был недоступен.	установить
+allow	ru	en	dispute	спор	The dispute between Ford and Tesla lasted for years.	Спор Ford—Tesla длился несколько лет.	Спор
+allow	ru	en	dispute	спор	The dispute between Ford and Tesla lasted for years.	Спор ford-TESLA длился несколько лет.	Спор
+allow	ru	en	dispute	спор	The dispute between Ford and Tesla lasted for years.	Спор Ford, Tesla длился несколько лет.	Спор
+allow	ru	en	dispute	спор	The dispute between Ford and Tesla lasted for years.	Спор (FORD / Tesla) длился несколько лет.	Спор
+allow	ru	en	dispute	спор	The dispute between Ford and Tesla lasted for years.	Спор Ford — Tesla длился несколько лет.	Спор
+deny	ru	en	person	человек	THE PEOPLE crossed the square before sunrise.	Вчера PEOPLE пересекли площадь до рассвета.	PEOPLE
+deny	en	ru	людьми	people	У вокзала собрались люди.	Two человека were waiting outside the station.	человека
+deny	fr	en	contact npm	contacter le projet	Contact NPM today about the release.	npm publiera la nouvelle version demain.	npm
+deny	ru	en	order	заказать	Please order the repairs at Ford before we leave for New York.	Закажи ремонт в York New перед нашим отъездом.	ремонт
+deny	ru	en	order	заказать	We got the car fixed before asking Ford to order the part.	Мы got the car fixed до закрытия мастерской.	мастерской
+allow	ru	en	install	установить	Try installing with pnpm before lunch.	До обеда попробуй установить пакет через «pnpm».	установить
+deny	fr	en	ox	bœuf	Oxen crossed the bridge in the early morning.	Les Oxen ont traversé le pont au petit matin.	Oxen
+allow	ru	en	publish	выпустить	People will publish the interview tomorrow morning.	Журнал People выпустит интервью завтра утром.	выпустит
+deny	ru	en	person	человек	The People waited for another train.	У платформы People ждали другой поезд.	ждали
+deny	fr	en	child	enfant	The CHILDREN met before the concert.	Les voisins ont vu les children avant le concert.	voisins
+allow	ru	en	the Big Apple	Нью-Йорк	The Big Apple, or NYC, hosts the marathon every year.	В NYC каждый год проходит марафон.	NYC

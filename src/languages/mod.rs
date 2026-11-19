@@ -32,7 +32,7 @@ pub(crate) use prompt_examples::ContextExamples as ExplanationContext;
 pub(crate) use prompt_examples::LanguagePromptExamples;
 pub(crate) use prompt_examples::recall_document as prompt_recall_examples_document;
 pub(crate) use prompt_examples::{explanation_scripts, is_meaning_header};
-pub(crate) use reader::{ReaderVocabulary, stemmer};
+pub(crate) use reader::{ReaderVocabulary, StudyStems, unlisted_label};
 pub use registry::{LanguageCatalog, LanguageCode, catalog, language};
 
 /// Resolve reader conventions from the same complete prompt-example catalog.

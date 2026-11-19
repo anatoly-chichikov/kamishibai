@@ -80,11 +80,18 @@ up to one repair. Card writing, spelling repair, pronunciation, explanation
 and translation share a limit of six text requests per metadata attempt and
 24 over four attempts per card. Cards with multiple reviewed meanings get an
 independent sentence translation when the explanation passes and budget
-remains. Each generated Anki front is checked in the reader's language. If
-the author's sentence fails, an independent translation can recover the card
-within the same budget. Distinctive scripts identify the reader directly.
-Languages sharing a script use compact offline models. A missing translation
-drops only its optional example.
+remains. The offline check looks for copies, near copies and untranslated
+forms of the study expression on the Anki front, including capitalized
+forms such as “People” for “person”. Names can keep their spelling with
+different capitalization or punctuation, as in “npm”/“NPM” and “Ford—Tesla”.
+An identical study form needs confirmation from the card's own translation.
+The language check targets sentences in the learning language or in English
+when those differ from the reader's language. Other languages outside the
+catalog can pass when they share the reader's script, such as Marathi on a
+Hindi front. Deliberate Unicode disguises beyond normalization and case
+folding are outside the check's scope. If the author's sentence fails, an
+independent translation can recover the card within the same budget. A
+missing translation drops only its optional example.
 The [console contract](llms.txt) specifies the reader-field rule. A rejected
 explanation keeps the original metadata text. Existing cached cards and Anki note identities
 stay intact, including imported JSON without an explicit explanation format.

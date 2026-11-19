@@ -16,6 +16,34 @@ fn contract() -> String {
 }
 
 #[test]
+fn release_archives_cannot_omit_notices_for_embedded_reader_components() {
+    let notice = include_str!("../NOTICE");
+    let missing: Vec<_> = [
+        "caseless",
+        "Simon Sapin",
+        "snowball_stemmers_rs",
+        "Wolf Garbe",
+        "Dr Martin Porter",
+        "Richard Boulton",
+        "Yoshiki Shibukawa",
+        "Olly Betts",
+        "fancy-regex",
+        "The Fancy Regex Authors",
+        "bit-set",
+        "bit-vec",
+        "The Rust Project Developers",
+        "Wikipedia",
+    ]
+    .into_iter()
+    .filter(|item| !notice.contains(item))
+    .collect();
+    assert!(
+        missing.is_empty(),
+        "distributed NOTICE omitted upstream attributions: {missing:?}"
+    );
+}
+
+#[test]
 fn release_review_export_instructions_cannot_hide_a_saved_archive_after_ctrl_c() {
     let output = Command::cargo_bin("kamishibai")
         .unwrap()

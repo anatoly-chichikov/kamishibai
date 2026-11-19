@@ -97,23 +97,9 @@ jobs:
             target/release/kamishibai agent-contract > embedded-llms.txt
           fi
           cmp llms.txt embedded-llms.txt
-      - name: Package Unix binary
-        if: runner.os != 'Windows'
-        run: |
-          mkdir -p dist
-          cp target/release/kamishibai dist/kamishibai
-          cp llms.txt dist/llms.txt
-          cp LICENSE NOTICE dist/
-          tar -C dist -czf "${KAMISHIBAI_ARCHIVE}" kamishibai llms.txt LICENSE NOTICE
-      - name: Package Windows binary
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force dist
-          Copy-Item target\release\kamishibai.exe dist\kamishibai.exe
-          Copy-Item llms.txt dist\llms.txt
-          Copy-Item LICENSE, NOTICE -Destination dist
-          Compress-Archive -Path dist\kamishibai.exe, dist\llms.txt, dist\LICENSE, dist\NOTICE -DestinationPath "${env:KAMISHIBAI_ARCHIVE}"
+      - name: Package binary and third-party notices
+        shell: bash
+        run: python3 tools/package_release.py "${{ matrix.target }}" "${KAMISHIBAI_ARCHIVE}"
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:

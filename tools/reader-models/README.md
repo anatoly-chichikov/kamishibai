@@ -38,3 +38,7 @@ Its differential test compares the resulting analyses with upstream Ablaut.
 
 Pass a temporary directory as the second argument to compare its generated
 files with the tracked copies using `cmp`. [Attribution and licenses](../../NOTICE)
+
+## Backlog
+
+- Detect same-script languages outside the CLI catalog, including Marathi on Hindi fronts, Yiddish on Hebrew fronts and Danish on Swedish fronts, if these languages enter the generation context.
