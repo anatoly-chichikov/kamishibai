@@ -62,7 +62,7 @@ kamishibai writes:
 
 The front asks: the illustration, the sentence in your language, a hint. The back answers: the same sentence in the learning language, read by a native voice, with the gloss, IPA, and a usage note.
 
-The printable sheet uses four fixed-size fold-cards per A4 page. Explanations show at most five reviewed meanings: the selected meaning first and bold, then the highest-priority alternatives. The complete meaning list stays available for choosing cards. Concise guidance on usage, unsuitable situations, and one useful nuance follows the glossary. Denser cards use tighter spacing within the same card size.
+The printable sheet uses four fixed-size fold-cards per A4 page. New explanations show the selected meaning first and brighter, within the five-line glossary limit. More than five reviewed meanings keep the metadata explanation without calling the explanation writer or editor. Legacy contexts retain their original five-meaning projection and bold selected meaning. The complete meaning list stays available for choosing cards. Concise guidance on usage, unsuitable situations, and one useful nuance follows the glossary. Denser cards use tighter spacing within the same card size.
 
 Import the deck into Anki, and the cards look roughly like this on your phone:
 
@@ -70,6 +70,16 @@ Import the deck into Anki, and the cards look roughly like this on your phone:
   <img src="docs/previews/anki-card-front.jpg" alt="Anki card front preview" width="260">
   <img src="docs/previews/anki-card-back.jpg" alt="Anki card back preview" width="260">
 </p>
+
+The reviewed explanation lists the meanings with the card’s own meaning first
+and brighter. The familiar sections describe where it occurs,
+where it does not fit, and a useful nuance; empty sections disappear. Only
+headings are bold, learning-language phrases use the reader's quotation marks,
+and a common mistake includes a short reason. The author and editor each get
+up to one repair. Card writing, a spelling retry, pronunciation, and explanation
+share a limit of six text requests per metadata attempt and 24 over four
+attempts per card. A rejected explanation keeps the original metadata text. Existing cached cards and Anki
+note identities stay intact, including imported JSON without a context format.
 
 ## Console
 
@@ -98,9 +108,10 @@ before that confirmation. The last screen links the folder and file, then points
 to [app.kamishibai.io](https://app.kamishibai.io/import), where the import sheet
 suggests the language pair. No Gemini key is needed.
 
-Use `--out DIR` for another destination. `Esc` goes back or exits before saving;
-during saving it cancels before the verified file is published. Ctrl+C exits from
-any selection page; during saving it shows cleanup and the cancellation outcome.
+Use `--out DIR` for another destination. Esc goes back and Ctrl+C exits from
+selection pages. During saving, either key requests cancellation. If the worker
+cancels before publication, Ctrl+C prints `export cancelled, nothing saved` after cleanup.
+If the worker publishes the verified ZIP first, Ctrl+C prints `saved <path>` in the terminal.
 For scripts, `--json` previews without writing and `--save` saves without opening
 the screen:
 
