@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use caseless::Caseless;
+use kamishibai_reader_verbs::Language as VerbLanguage;
 use snowball_stemmers_rs::Stemmer;
 use unicode_normalization::UnicodeNormalization;
 use unicode_script::{Script, UnicodeScript};
@@ -92,7 +93,7 @@ impl ReaderField {
             .flat_map(|text| tokens(text))
             .map(|word| word.folded)
             .collect();
-        let mut vocabulary = ReaderVocabulary::from_codes(self.reader, self.learning);
+        let vocabulary = ReaderVocabulary::new(self.reader, self.learning, &self.known);
         if translated
             .iter()
             .any(|w| !gloss.iter().any(|g| g == w) && vocabulary.foreign(w, original.contains(w)))
@@ -125,13 +126,9 @@ impl Word<'_> {
             .any(|ch| ch.is_uppercase() || ch.is_numeric())
     }
 
-    fn infinitives(&self, language: ablaut::Lang) -> &[String] {
-        self.infinitives.get_or_init(|| {
-            ablaut::reverse(&self.folded, language)
-                .into_iter()
-                .map(|form| form.infinitive)
-                .collect()
-        })
+    fn infinitives(&self, language: VerbLanguage) -> &[String] {
+        self.infinitives
+            .get_or_init(|| language.infinitives(&self.folded))
     }
 
     fn stem(&self, morphology: Option<&Stemmer>) -> String {
@@ -176,7 +173,7 @@ fn tokens(text: &str) -> Vec<Word<'_>> {
 struct StudyExpression<'a> {
     words: Vec<Word<'a>>,
     morphology: Option<Stemmer>,
-    language: Option<ablaut::Lang>,
+    language: Option<VerbLanguage>,
 }
 
 impl<'a> StudyExpression<'a> {
@@ -184,12 +181,7 @@ impl<'a> StudyExpression<'a> {
         Self {
             words,
             morphology,
-            language: ablaut::Lang::from_code(code).filter(|lang| {
-                matches!(
-                    lang,
-                    ablaut::Lang::Eng | ablaut::Lang::Fra | ablaut::Lang::Deu | ablaut::Lang::Spa
-                )
-            }),
+            language: VerbLanguage::from_code(code),
         }
     }
 
@@ -564,6 +556,39 @@ mod tests {
         assert!(
             leaked.is_empty(),
             "a different inflection of the study term reached the reader: {leaked:?}"
+        );
+    }
+
+    #[test]
+    fn a_regular_form_outside_the_exception_lexicon_cannot_reach_the_front() {
+        let leaks: Vec<_> = [
+            ("fr", "manger", "Il aime manger dehors.", "mangeons", "eat"),
+            (
+                "de",
+                "arbeiten",
+                "Sie arbeiten im Garten.",
+                "arbeitetest",
+                "work",
+            ),
+            (
+                "de",
+                "fragte",
+                "Sie fragte den Nachbarn.",
+                "fragen",
+                "asked",
+            ),
+        ]
+        .into_iter()
+        .filter(|&(language, term, back, form, meaning)| {
+            let front = format!("The children saw the word {form} in the garden this morning.");
+            ReaderField::from_codes("en", language)
+                .unwrap()
+                .translates_sentence(back, &front, term, &[meaning])
+        })
+        .collect();
+        assert!(
+            leaks.is_empty(),
+            "a regular study verb reached the front: {leaks:?}"
         );
     }
 

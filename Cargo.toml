@@ -1,3 +1,8 @@
+[workspace]
+members = ["crates/reader-verbs"]
+exclude = ["tools/reader-models"]
+resolver = "3"
+
 [package]
 name = "kamishibai"
 version = "1.19.3"
@@ -11,18 +16,18 @@ publish = false
 autotests = false
 
 [dependencies]
-ablaut = "=0.11.0"
 allsorts = { version = "=0.16.1", default-features = false, features = ["flate2_rust"] }
 anyhow = "=1.0.102"
+byteorder = "=1.5.0"
 caseless = "=0.2.2"
 clap = { version = "=4.6.1", features = ["derive"] }
 console = "=0.16.3"
 crossterm = "=0.29.0"
 dirs = "=6.0.0"
 fancy-regex = "=0.11.0"
+flate2 = "=1.1.9"
 image = "=0.25.10"
-langid-rs = "=1.1.0"
-langidentify = { version = "=0.1.0", features = ["lite"] }
+kamishibai-reader-verbs = { path = "crates/reader-verbs" }
 lopdf = { version = "=0.39.0", default-features = false }
 md5 = "=0.8.0"
 ocr-rs = "=2.4.1"

@@ -660,15 +660,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cjclassifier"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b65dbae75fe61aa5664cf1deb391fa77ed2a1fd6af4fea57c3559097106a8b0"
-dependencies = [
- "flate2",
-]
-
-[[package]]
 name = "clang-sys"
 version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2097,11 +2088,11 @@ dependencies = [
 name = "kamishibai"
 version = "1.19.3"
 dependencies = [
- "ablaut",
  "allsorts",
  "anyhow",
  "assert_cmd",
  "assert_fs",
+ "byteorder",
  "caseless",
  "clap",
  "console",
@@ -2109,10 +2100,10 @@ dependencies = [
  "dirs",
  "expectrl",
  "fancy-regex",
+ "flate2",
  "image",
  "insta",
- "langid-rs",
- "langidentify",
+ "kamishibai-reader-verbs",
  "lopdf",
  "md5",
  "ocr-rs",
@@ -2147,6 +2138,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "kamishibai-reader-verbs"
+version = "0.1.0"
+dependencies = [
+ "ablaut",
+]
+
+[[package]]
 name = "kasuari"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2162,46 +2160,6 @@ name = "lab"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf36173d4167ed999940f804952e6b08197cae5ad5d572eb4db150ce8ad5d58f"
-
-[[package]]
-name = "langid-rs"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13737fdd7a7043346109f6481c4ffe0c85a26eb786b9228a46ee3ef202241322"
-
-[[package]]
-name = "langidentify"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4037fde0a62ff8311a765bef38cf859ad85fcd5bcc3657b99cb08cc735ac98e1"
-dependencies = [
- "cjclassifier",
- "flate2",
- "langidentify-models-lite",
- "log",
-]
-
-[[package]]
-name = "langidentify-models-lite"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a772c217d7e6a299cf91fc79f707cdb5c676e0099aca2797a73a676a4266c2ef"
-dependencies = [
- "langidentify-models-lite-a",
- "langidentify-models-lite-b",
-]
-
-[[package]]
-name = "langidentify-models-lite-a"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e86f815105e9cb5636db95828c8460b7055fa6452940bc1de132cb3d24dfaeef"
-
-[[package]]
-name = "langidentify-models-lite-b"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f0f40f963126f5e66a6da9cc0ed4b7708178695c4d343b614dda0a7e6b6a34b"
 
 [[package]]
 name = "lazy_static"
