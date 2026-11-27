@@ -1,5 +1,5 @@
 kamishibai agent contract
-Release: 1.19.0
+Release: 1.19.1
 
 Overview
 
@@ -28,7 +28,7 @@ kamishibai agent-contract
 
 It prints the contract embedded in the installed binary. Its `Release` always
 matches that binary's application version. The release-pinned remote copy is
-`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.19.0/llms.txt`;
+`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.19.1/llms.txt`;
 never use mutable `main/llms.txt` as the installed binary's contract.
 
 Language terminology is fixed:
@@ -286,7 +286,8 @@ meta.json records retain the explanation parts, assignment stamp and Metadata
 draft as optional provenance. Accepted parts select the new rendering; a rejected
 attempt keeps legacy rendering. Cards JSON carries `source.context_format` as
 `explanation_v1` for the new layout. Its absence means legacy rendering even
-when the text resembles a new explanation, preserving old note fields and GUIDs.
+when the text resembles a new explanation. As of 1.19.1, Anki note fields
+escape vocabulary text as HTML and keep their original GUIDs.
 Correction uses that draft as its factual source
 and reruns the explanation with the learner's request. Explicit settings are
 accepted with both word intake

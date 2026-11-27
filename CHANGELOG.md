@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.19.1
+
+- Escape vocabulary text in Anki decks while preserving note GUIDs for reimports.
+
 ## 1.19.0
 
 - New cards show reviewed explanations with the selected meaning first, examples in the reader’s language, and empty sections omitted. Existing cards keep their explanations.

@@ -1,4 +1,5 @@
-use crate::vocabulary::VocabularyEntry;
+use crate::markdown::escape_html;
+use crate::vocabulary::{ContextFormat, VocabularyEntry};
 
 use super::Model;
 
@@ -89,32 +90,16 @@ impl VocabularyNote {
 impl NoteFormat for VocabularyNote {
     /// Return one formatted note for the entry and relative media tags.
     fn note(&self, entry: &VocabularyEntry, audio: &str, image: &str) -> Note {
-        let source = entry.source.sentence.as_str().replace(
-            entry.source.highlight.as_str(),
-            format!(
-                "<strong><em>{}</em></strong>",
-                entry.source.highlight.as_str()
-            )
-            .as_str(),
-        );
-        let fields = vec![
-            source,
-            entry.term.as_str().to_lowercase(),
-            Transcription::new(entry.pronunciation.as_str()).formatted(),
-            String::from(entry.meaning.as_str()),
-            HtmlLineBreaks::new(entry.target.sentence.as_str()).formatted(),
-            entry.importance.to_string(),
-            String::from(audio),
-            String::from(image),
-            String::from(entry.source.hint.as_str()),
-            entry
-                .source
-                .context_format
-                .html(entry.source.context.as_str()),
-            Transcription::new(entry.transcription.as_str()).formatted(),
-        ];
+        let guid = guid(&fields(
+            entry,
+            audio,
+            image,
+            str::to_owned,
+            ContextFormat::guid_html,
+        ));
+        let fields = fields(entry, audio, image, escape_html, ContextFormat::html);
         Note {
-            guid: guid(fields.as_slice()),
+            guid,
             sort_field: fields[0].clone(),
             fields,
         }
@@ -124,6 +109,38 @@ impl NoteFormat for VocabularyNote {
     fn model(&self) -> &Model {
         &self.model
     }
+}
+
+fn fields(
+    entry: &VocabularyEntry,
+    audio: &str,
+    image: &str,
+    text: fn(&str) -> String,
+    context: fn(ContextFormat, &str) -> String,
+) -> Vec<String> {
+    let highlight = entry.source.highlight.as_str();
+    let marked = format!("<strong><em>{}</em></strong>", text(highlight));
+    let source = entry
+        .source
+        .sentence
+        .as_str()
+        .split(highlight)
+        .map(text)
+        .collect::<Vec<_>>()
+        .join(&marked);
+    vec![
+        source,
+        text(&entry.term.as_str().to_lowercase()),
+        Transcription::new(text(entry.pronunciation.as_str())).formatted(),
+        text(entry.meaning.as_str()),
+        HtmlLineBreaks::new(text(entry.target.sentence.as_str())).formatted(),
+        entry.importance.to_string(),
+        String::from(audio),
+        String::from(image),
+        text(entry.source.hint.as_str()),
+        context(entry.source.context_format, entry.source.context.as_str()),
+        Transcription::new(text(entry.transcription.as_str())).formatted(),
+    ]
 }
 
 /// Return the deterministic Anki guid for one field set.

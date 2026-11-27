@@ -33,10 +33,20 @@ impl ContextFormat {
     /// Render the persisted format into its exact Anki note field.
     #[must_use]
     pub fn html(self, input: &str) -> String {
+        self.render_html(input, true)
+    }
+
+    /// Render the historical Anki field bytes used to compute a note GUID.
+    #[must_use]
+    pub(crate) fn guid_html(self, input: &str) -> String {
+        self.render_html(input, false)
+    }
+
+    fn render_html(self, input: &str, escape_apostrophes: bool) -> String {
         let blocks = self.parse(input);
         match self {
-            Self::Legacy => to_html(&blocks),
-            Self::ExplanationV1 => explanation_html(&blocks),
+            Self::Legacy => legacy_html(&blocks, escape_apostrophes),
+            Self::ExplanationV1 => explanation_html(&blocks, escape_apostrophes),
         }
     }
 
@@ -230,6 +240,10 @@ pub fn parse_markdown(input: &str) -> Vec<Block> {
 /// because Anki's web view strips most class-based CSS.
 #[must_use]
 pub fn to_html(blocks: &[Block]) -> String {
+    legacy_html(blocks, false)
+}
+
+fn legacy_html(blocks: &[Block], escape_apostrophes: bool) -> String {
     let mut out = String::new();
     let mut in_list = false;
     for block in blocks {
@@ -240,7 +254,7 @@ pub fn to_html(blocks: &[Block]) -> String {
                     in_list = true;
                 }
                 out.push_str("<li>");
-                push_html_chunks(&mut out, chunks);
+                push_html_chunks(&mut out, chunks, escape_apostrophes);
                 out.push_str("</li>");
             }
             Block::Paragraph(chunks) => {
@@ -249,7 +263,7 @@ pub fn to_html(blocks: &[Block]) -> String {
                     in_list = false;
                 }
                 out.push_str("<p style=\"margin: 0.4em 0;\">");
-                push_html_chunks(&mut out, chunks);
+                push_html_chunks(&mut out, chunks, escape_apostrophes);
                 out.push_str("</p>");
             }
         }
@@ -293,7 +307,7 @@ fn terminal(blocks: &[Block], explanation: bool) -> Vec<Line<'static>> {
         .collect()
 }
 
-fn explanation_html(blocks: &[Block]) -> String {
+fn explanation_html(blocks: &[Block], escape_apostrophes: bool) -> String {
     let mut output = String::new();
     let mut list = false;
     let mut order = 0;
@@ -313,7 +327,7 @@ fn explanation_html(blocks: &[Block]) -> String {
                     "--kamishibai-hint"
                 };
                 output.push_str(&format!("<li style=\"color: var({color}, inherit);\">"));
-                push_html_chunks(&mut output, chunks);
+                push_html_chunks(&mut output, chunks, escape_apostrophes);
                 output.push_str("</li>");
                 order += 1;
             }
@@ -332,7 +346,7 @@ fn explanation_html(blocks: &[Block]) -> String {
                 } else {
                     output.push_str("<p style=\"margin: 0.55em 0; line-height: 1.5;\">");
                 }
-                push_html_chunks(&mut output, chunks);
+                push_html_chunks(&mut output, chunks, escape_apostrophes);
                 output.push_str("</p>");
             }
         }
@@ -501,7 +515,7 @@ fn chunk_span(chunk: &TextChunk) -> Span<'static> {
 
 /// Emit one chunk into an HTML buffer with the matching opening / closing
 /// inline tag pair and HTML-escaped text.
-fn push_html_chunks(out: &mut String, chunks: &[TextChunk]) {
+fn push_html_chunks(out: &mut String, chunks: &[TextChunk], escape_apostrophes: bool) {
     for chunk in chunks {
         let (open, close) = match (chunk.bold, chunk.italic) {
             (true, true) => ("<strong><em>", "</em></strong>"),
@@ -510,19 +524,27 @@ fn push_html_chunks(out: &mut String, chunks: &[TextChunk]) {
             (false, false) => ("", ""),
         };
         out.push_str(open);
-        push_html_escape(out, &chunk.text);
+        push_html_escape(out, &chunk.text, escape_apostrophes);
         out.push_str(close);
     }
 }
 
-/// Append `text` to `out` with the four HTML-special characters escaped.
-fn push_html_escape(out: &mut String, text: &str) {
+/// Escape text for an HTML note field.
+#[must_use]
+pub(crate) fn escape_html(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    push_html_escape(&mut output, text, true);
+    output
+}
+
+fn push_html_escape(out: &mut String, text: &str, escape_apostrophes: bool) {
     for ch in text.chars() {
         match ch {
             '&' => out.push_str("&amp;"),
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
+            '\'' if escape_apostrophes => out.push_str("&#39;"),
             _ => out.push(ch),
         }
     }
