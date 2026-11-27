@@ -8,7 +8,7 @@ use anyhow::Result;
 use kamishibai::anki::{
     CardModel, HtmlLineBreaks, NoteFormat, StableId, Transcription, VocabularyDeck, VocabularyNote,
 };
-use kamishibai::vocabulary::{VocabularyDocument, VocabularyEntry};
+use kamishibai::vocabulary::{ContextFormat, NonEmptyText, VocabularyDocument, VocabularyEntry};
 use rusqlite::Connection;
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -302,6 +302,98 @@ fn old_note_guids_cannot_change_on_reimport() {
         [String::from("76U*F;h)z"), String::from("k6Q#u8NdG&")],
         "a published note changed its guid and would duplicate on reimport"
     );
+}
+
+fn entry_with_html_characters() -> VocabularyEntry {
+    serde_json::from_value(json!({
+        "term": "Rock & Roll <b>\"'",
+        "meaning": "Meaning a < b & <b>\"'",
+        "pronunciation": "/sound < & <b>\"'/",
+        "transcription": "/spelling < & <b>\"'/",
+        "importance": 7,
+        "source": {
+            "sentence": "a < b & 'rock & roll' \"<b>\" and 'rock & roll'",
+            "lang": "en",
+            "highlight": "'rock & roll'",
+            "hint": "Hint < & <b>\"'",
+            "context": "**Context < & <b>\"' &lt;**\n- *example*"
+        },
+        "target": {
+            "sentence": "Translation < & <b>\"'\nSecond line",
+            "lang": "el"
+        }
+    }))
+    .expect("the note fixture must contain valid vocabulary")
+}
+
+#[test]
+fn saved_apkg_cannot_turn_vocabulary_text_into_html() -> Result<()> {
+    let directory = TempDir::new()?;
+    let output = directory.path().join("literal-text.apkg");
+    let mut deck = VocabularyDeck::new(
+        StableId::new("Kamishibai Deck").value(),
+        "Kamishibai Deck",
+        VocabularyNote::new(CardModel::new().model()),
+        [],
+    );
+    let mut entry = entry_with_html_characters();
+    let audio = "[sound:test.wav]";
+    let image = "<img src='test.jpg'>";
+    deck.add(&entry, audio, image);
+    entry.source.context_format = ContextFormat::ExplanationV1;
+    deck.add(&entry, audio, image);
+    deck.save(&output)?;
+    let mut fields = json!([
+        "a &lt; b &amp; <strong><em>&#39;rock &amp; roll&#39;</em></strong> &quot;&lt;b&gt;&quot; and <strong><em>&#39;rock &amp; roll&#39;</em></strong>",
+        "rock &amp; roll &lt;b&gt;&quot;&#39;",
+        "/sound &lt; &amp; &lt;b&gt;&quot;&#39;/",
+        "Meaning a &lt; b &amp; &lt;b&gt;&quot;&#39;",
+        "Translation &lt; &amp; &lt;b&gt;&quot;&#39;<br>Second line",
+        "7",
+        audio,
+        image,
+        "Hint &lt; &amp; &lt;b&gt;&quot;&#39;",
+        "<p style=\"margin: 0.4em 0;\"><strong>Context &lt; &amp; &lt;b&gt;&quot;&#39; &amp;lt;</strong></p><ul style=\"margin: 0.4em 0; padding-left: 1.2em;\"><li><em>example</em></li></ul>",
+        "/spelling &lt; &amp; &lt;b&gt;&quot;&#39;/"
+    ]);
+    let legacy = fields.clone();
+    fields[9] = json!(
+        "<p style=\"margin: 0.55em 0; line-height: 1.5;\"><strong>Context &lt; &amp; &lt;b&gt;&quot;&#39; &amp;lt;</strong></p><ul style=\"margin: 0.45em 0; padding-left: 1.2em; line-height: 1.5;\"><li style=\"color: var(--kamishibai-term, inherit);\"><em>example</em></li></ul>"
+    );
+    assert_eq!(
+        manifest(&output)?["notes"],
+        json!([legacy, fields]),
+        "the saved Anki notes lost literal text or changed their formatting"
+    );
+    Ok(())
+}
+
+#[test]
+fn notes_with_html_characters_cannot_change_guids_on_reimport() {
+    let format = VocabularyNote::new(CardModel::new().model());
+    let mut entry = entry_with_html_characters();
+    let legacy = format.note(&entry, "[sound:test.wav]", "<img src='test.jpg'>");
+    entry.source.context_format = ContextFormat::ExplanationV1;
+    let explanation = format.note(&entry, "[sound:test.wav]", "<img src='test.jpg'>");
+    assert_eq!(
+        [legacy.guid.as_str(), explanation.guid.as_str()],
+        ["jE9!s=igW`", "B]Lgj5[SqR"],
+        "a published note with HTML-special characters would duplicate on reimport"
+    );
+}
+
+#[test]
+fn highlight_cannot_match_inside_an_html_entity() -> Result<()> {
+    let mut entry = entry_with_html_characters();
+    entry.source.sentence = NonEmptyText::new("amp & amp")?;
+    entry.source.highlight = NonEmptyText::new("amp")?;
+    let format = VocabularyNote::new(CardModel::new().model());
+    let note = format.note(&entry, "", "");
+    assert_eq!(
+        note.sort_field, "<strong><em>amp</em></strong> &amp; <strong><em>amp</em></strong>",
+        "the highlight split an entity or the sort field lost its literal ampersand"
+    );
+    Ok(())
 }
 
 /// Deck attachment keeps insertion order while deduplicating paths.

@@ -331,8 +331,8 @@ fn review_f1_unweighted_imported_contexts_cannot_change_legacy_note_identity() {
         .filter_map(|case| {
             let entry = serde_json::from_value(case["entry"].clone()).unwrap();
             let note = format.note(&entry, "[sound:a.wav]", "");
-            (note.guid != case["guid"] || note.fields[9] != case["html"])
-                .then_some(case["name"].clone())
+            let html = case["html"].as_str().unwrap().replace('\'', "&#39;");
+            (note.guid != case["guid"] || note.fields[9] != html).then_some(case["name"].clone())
         })
         .collect::<Vec<_>>();
     assert!(
